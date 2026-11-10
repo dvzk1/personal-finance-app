@@ -33,7 +33,7 @@ import secrets
 import threading
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -42,6 +42,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import budgets, categorize, config, edit, reimbursements, report, sheets
+from . import taxonomy as T
 from . import edit_payload as EP
 from .errors import FinanceError
 from .invest import operations as invest_ops
@@ -61,6 +62,7 @@ REPORT_DELAY = 1.5          # folga antes de reescrever data/reports depois de e
 MAX_BODY = 1 << 20          # 1 MiB: a maior edição real (divisão, carteira) cabe com sobra
 SHEETS_TTL = 30             # s: na planilha não há como saber que outro processo gravou
 MIN_TOKEN = 16
+_today = date.today
 FLOW_REPORT = re.compile(r"^(dashboard|rules|\d{4}-\d{2})\.json$")
 
 
@@ -128,6 +130,13 @@ class ReportCache:
     def invalidate(self) -> None:
         self.generation += 1
 
+    def store(self, result: dict | None) -> None:
+        """Guarda o relatório que quem gravou acabou de calcular, em vez de jogá-lo fora e
+        calcular de novo na próxima leitura. Sem resultado, só invalida."""
+        self.invalidate()
+        if result is not None:
+            self.result, self.key = result, self._key()
+
     def _key(self) -> tuple:
         if sheets.LOCAL:
             from . import sqlite_store
@@ -135,13 +144,17 @@ class ReportCache:
         else:
             source = int(time.monotonic() // SHEETS_TTL)
         invest = config.REPORTS_DIR / "invest.json"
-        return (self.generation, source,
+        # o dia entra porque o relatório usa a data de hoje (ritmo do orçamento do mês)
+        return (self.generation, source, _today(),
                 invest.stat().st_mtime_ns if invest.exists() else None)
 
     def taxonomy(self) -> dict:
-        """Taxonomia do último cálculo, mesmo que velho: ela quase nunca muda, e recalcular
-        o relatório a cada edição de linha custaria a releitura do banco inteiro."""
-        return (self.result or self.get())["dashboard"]["taxonomy"]
+        """Taxonomia para validar uma edição de linha: a do último cálculo, mesmo que
+        velho (ela quase nunca muda), ou lida sozinha. Nunca o relatório inteiro, que
+        custaria a releitura do banco e falharia junto com qualquer parte dele."""
+        if self.result is not None:
+            return self.result["dashboard"]["taxonomy"]
+        return T.load()
 
     def get(self) -> dict:
         """Chame sob a trava: o cálculo lê o banco pela conexão compartilhada."""
@@ -225,8 +238,13 @@ class SyncScheduler:
         status.update(running=True, last_started=datetime.now(timezone.utc).isoformat())
         try:
             with self.state.lock:
-                result = self.job()
-                self.state.reports.invalidate()
+                try:
+                    result = self.job()
+                except BaseException:
+                    # mesmo falhando no meio, o sync pode já ter gravado transações
+                    self.state.reports.invalidate()
+                    raise
+                self.state.reports.store(result.pop("report", None))
             status.update(last_ok=True, last_error=None, last_result=result)
             return result
         except Exception as error:
@@ -243,15 +261,18 @@ class SyncScheduler:
         from . import sync
         flow = sync.run(days=30)
         rules = categorize.prepare()
+        # A carteira é opcional, como no `start.sh --sync`: sem ela, ou com a parte de
+        # investimentos da Pluggy fora do ar, o Fluxo segue e o relatório sai.
         try:
             invest = invest_ops.sync(apply_balances=True)
             balances = {"written": invest["written"], "pending": len(invest["pending"])}
-        except sheets.SheetsError:
-            balances = None          # sem carteira de investimentos
-        report.generate()
+        except Exception as error:
+            log.warning("saldos da carteira não atualizados: %s", error)
+            balances = {"error": str(error) or type(error).__name__}
         return {"added": flow["added"], "updated": flow["updated"],
                 "uncategorized": flow["uncategorized"], "by_rule": rules["by_rule"],
-                "by_map": rules["by_map"], "balances": balances}
+                "by_map": rules["by_map"], "balances": balances,
+                "report": report.generate()}
 
 
 # ------------------------------------------------------------------- estado do app
@@ -274,13 +295,17 @@ class AppState:
         with self._timer_lock:
             if self._timer:
                 self._timer.cancel()
-            self._timer = threading.Timer(REPORT_DELAY, self._write_reports)
-            self._timer.daemon = True
-            self._timer.start()
+            timer = threading.Timer(REPORT_DELAY, lambda: self._write_reports(timer))
+            timer.daemon = True
+            self._timer = timer
+            timer.start()
 
-    def _write_reports(self) -> None:
+    def _write_reports(self, fired: threading.Timer | None = None) -> None:
         with self._timer_lock:
-            self._timer = None
+            # só esquece o timer que disparou: um mais novo, de outra edição, continua
+            # pendente e o `flush_report` ainda o encontra
+            if fired is not None and self._timer is fired:
+                self._timer = None
         with self.lock:
             try:
                 report.write(self.reports.get())
@@ -408,7 +433,7 @@ def apply_destinations(state: AppState, p: dict) -> dict:
     destino lê a categoria dele. O apply regera invest.json e o relatório do Fluxo."""
     result = invest_ops.apply(
         {"links": [{"ledger_id": p["ids"][0], "destinations": p["destinations"]}]})
-    state.reports.invalidate()
+    state.reports.store(result["flow_report"])
     if result["link_problems"]:
         raise FinanceError("\n".join(result["problems"]))
     return _summary(result)
@@ -456,6 +481,9 @@ def create_app(state: AppState | None = None, dist: Path | None = DIST) -> FastA
             return _fail(413, str(error))
         except FinanceError as error:
             return _fail(400, str(error))
+        except sheets.SheetsError as error:
+            # credencial vencida, aba que falta: o usuário resolve, então vê a mensagem
+            return _fail(502, f"Erro de acesso ao Sheets: {error}")
         except Exception:
             # o detalhe fica no terminal do servidor; o cliente recebe só o aviso
             log.error("erro em %s %s\n%s", request.method, path, traceback.format_exc())
@@ -527,7 +555,7 @@ def create_app(state: AppState | None = None, dist: Path | None = DIST) -> FastA
     # ---- investimentos
     def invest_apply_job(payload):
         result = invest_ops.apply(payload)
-        state.reports.invalidate()
+        state.reports.store(result["flow_report"])
         return result
 
     @app.post("/api/invest/apply")
@@ -558,8 +586,7 @@ def create_app(state: AppState | None = None, dist: Path | None = DIST) -> FastA
 
     # ---- planejamento
     def budget_job(data):
-        budgets.set_budget(data)
-        state.reports.invalidate()
+        state.reports.store(budgets.set_budget(data))
 
     @app.post("/api/budget")
     async def budget(request: Request):
@@ -605,7 +632,8 @@ def main() -> None:
     log.info("Finance Control em %s%s", url,
              " (sincronização agendada ligada)" if state.scheduler.enabled else "")
     state.scheduler.start()
-    if args.open:
+    state.schedule_report()      # data/reports em dia para o agente, com o cálculo que
+    if args.open:                # também serve a primeira leitura da tela
         import webbrowser
         threading.Timer(1.0, webbrowser.open, (url,)).start()
     try:

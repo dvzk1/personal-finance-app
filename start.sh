@@ -32,9 +32,7 @@ if [ "$SYNC" = 1 ]; then
     || echo "==> Sem carteira de investimentos: saldos nao atualizados."
 fi
 
-echo "==> Atualizando relatorios..."
-uv run python -m finance.report
-
+# O relatorio do Fluxo o servidor calcula ao subir (e grava em data/reports).
 # A carteira e opcional: quem ainda nao tem as abas de investimento segue sem ela.
 if uv run python -m finance.invest report >/dev/null 2>&1; then
   echo "==> Carteira de investimentos atualizada."

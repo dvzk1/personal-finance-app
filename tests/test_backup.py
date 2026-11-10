@@ -53,7 +53,7 @@ def test_opening_an_existing_database_makes_the_daily_copy(tmp_path):
         sqlite_store.write_records("Ledger", [{"id": "a", "date": "2026-05-01"}])
     assert backup.list_backups(path) == [], "banco novo não tem o que copiar"
 
-    sqlite_store._daily_checked.discard(path)
+    sqlite_store._daily_done.pop(path, None)
     with sqlite_store.opened(path):
         sqlite_store.read_records("Ledger")
     assert [b["reason"] for b in backup.list_backups(path)] == [backup.DAILY]
@@ -120,3 +120,20 @@ def test_copy_name_with_collision_suffix_keeps_its_reason(local_db):
     second = backup.create(backup.DAILY, now=moment)
     assert second.name.endswith("-diaria-2.db")
     assert {b["reason"] for b in backup.list_backups()} == {backup.DAILY}
+
+
+def test_long_running_connection_still_makes_one_copy_per_day(tmp_path, monkeypatch):
+    """O servidor fica semanas com a mesma conexão aberta: a cópia diária não pode
+    depender de abrir o banco de novo."""
+    path = tmp_path / "finance.db"
+    with sqlite_store.opened(path):
+        sqlite_store.write_records("Ledger", [{"id": "a", "date": "2026-05-01"}])
+    day = datetime(2026, 3, 10, 9)
+    monkeypatch.setattr(sqlite_store, "_now", lambda: day)
+    with sqlite_store.opened(path):
+        for hours in (0, 30, 54):        # mesma conexão: dia 10, 11 e 12
+            monkeypatch.setattr(sqlite_store, "_now", lambda h=hours: day + timedelta(hours=h))
+            sqlite_store.read_records("Ledger")
+            sqlite_store.read_records("Ledger")
+    days = sorted(b["created"].day for b in backup.list_backups(path))
+    assert days == [10, 11, 12]

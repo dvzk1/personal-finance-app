@@ -106,7 +106,10 @@ buscou.
 - `POST /api/sync/run`: roda agora (com o token da sessão, como toda gravação).
 
 Durante uma rodada, que leva de segundos a um minuto, uma gravação feita pela tela espera
-ela terminar: a sincronização reescreve o Ledger, e as duas juntas perderiam uma delas.
+ela terminar: a sincronização reescreve o Ledger, e as duas juntas perderiam uma delas. A
+CLI e o agente não passam por essa trava; por isso a rodada busca tudo na Pluggy antes de
+ler o Ledger, e o que eles gravarem enquanto ela espera a resposta é mantido. Se a parte
+de investimentos falhar, o Fluxo segue e o erro aparece em `last_result.balances`.
 
 O que precisa de decisão (lançamento sem categoria, aporte sem destino) continua na fila
 do `finance.show queue` e na aba Revisar.

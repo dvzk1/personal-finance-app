@@ -17,6 +17,7 @@ import atexit
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import date, datetime
 from pathlib import Path
 
 from . import config
@@ -30,7 +31,9 @@ _NUMERIC = ("float", "fnum", "qnum")
 _conn = None
 _opening_changes: list[str] = []     # o que a abertura do arquivo precisou criar
 _path_override: Path | None = None   # outro arquivo, aberto por `opened()`
-_daily_checked: set[Path] = set()    # bancos que já passaram pela cópia diária
+_conn_path: Path | None = None       # arquivo da conexão aberta
+_daily_done: dict[Path, date] = {}   # último dia em que cada banco passou pela cópia diária
+_now = datetime.now
 
 
 def db_path() -> Path:
@@ -56,22 +59,33 @@ def _quote(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _daily_copy(path: Path) -> None:
+    """Cópia do dia antes da primeira operação do dia, no lugar do histórico de versões
+    da planilha. Conferida a cada operação, não só ao abrir: o servidor fica semanas com
+    a mesma conexão."""
+    now = _now()
+    if _daily_done.get(path) == now.date():
+        return
+    _daily_done[path] = now.date()
+    if path.exists():            # banco que nasce hoje não tem o que proteger hoje
+        from . import backup
+        backup.daily(path, now=now)
+
+
 def _connect() -> sqlite3.Connection:
-    global _conn
-    if _conn is None:
-        path = db_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and path not in _daily_checked:
-            # primeira abertura do dia de um banco que já existe: cópia antes de qualquer
-            # gravação, no lugar do histórico de versões da planilha
-            _daily_checked.add(path)
-            from . import backup
-            backup.daily(path)
-        # O servidor chama de threads do pool, sempre sob a trava de escrita dele.
-        _conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
-        atexit.register(reset_cache)
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _opening_changes[:] = _create_missing(_conn)
+    global _conn, _conn_path
+    if _conn is not None:
+        _daily_copy(_conn_path)
+        return _conn
+    path = db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _daily_copy(path)
+    # O servidor chama de threads do pool, sempre sob a trava de escrita dele.
+    _conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
+    _conn_path = path
+    atexit.register(reset_cache)
+    _conn.execute("PRAGMA journal_mode=WAL")
+    _opening_changes[:] = _create_missing(_conn)
     return _conn
 
 

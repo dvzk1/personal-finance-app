@@ -54,19 +54,16 @@ def run(days: int = BACKFILL_DAYS, backfill: bool = False) -> dict:
 
     api_key = pc.get_api_key()
     state = _load_state()
-    ledger = L.load_ledger()
-    known_ids = set(ledger)
     local_timezone = load_timezone()
     min_date = _load_min_date()
     run_started = datetime.now(timezone.utc)
 
-    accounts = []
+    # 1) Busca tudo na Pluggy, o que pode levar um minuto, antes de ler o Ledger.
+    fetched = []
     with pc.build_client(api_key) as client:
         for item_id in items:
             for acc in pc.list_accounts(client, item_id):
-                acc_id = str(acc.id)
-                name = acc.marketing_name or acc.name
-                st = state.get(acc_id)
+                st = state.get(str(acc.id))
                 if backfill or st is None:
                     var_from = datetime.now(timezone.utc) - timedelta(days=days)
                     created_at_from = None
@@ -76,26 +73,31 @@ def run(days: int = BACKFILL_DAYS, backfill: bool = False) -> dict:
                     created_at_from = last - timedelta(days=2)  # overlap; upsert deduplica
                     var_from = None
                     mode = f"incremental desde {created_at_from.date()}"
-
                 txs = pc.fetch_transactions(
-                    client, acc_id, var_from=var_from, created_at_from=created_at_from
+                    client, str(acc.id), var_from=var_from, created_at_from=created_at_from
                 )
-                recs = [L.normalize(t, acc, item_id, local_timezone) for t in txs]
-                discarded = 0
-                if min_date:
-                    kept = [r for r in recs if r["date"] >= min_date]
-                    discarded = len(recs) - len(kept)
-                    recs = kept
-                added, updated = L.upsert(ledger, recs)
-                accounts.append({"item_id": str(item_id), "name": name,
-                                 "type": str(acc.type), "mode": mode,
-                                 "received": len(txs), "added": added,
-                                 "updated": updated, "discarded": discarded})
-                state[acc_id] = {
-                    "account_name": name,
-                    "item_id": str(item_id),
-                    "last_synced_at": run_started.isoformat(),
-                }
+                fetched.append((item_id, acc, mode, txs))
+
+    # 2) Só agora lê o Ledger, mescla e grava. A gravação reescreve a tabela (há linhas
+    # novas); lido antes da busca, o Ledger apagaria o que o agente ou a tela gravaram
+    # enquanto a Pluggy respondia.
+    ledger = L.load_ledger()
+    known_ids = set(ledger)
+    accounts = []
+    for item_id, acc, mode, txs in fetched:
+        name = acc.marketing_name or acc.name
+        recs = [L.normalize(t, acc, item_id, local_timezone) for t in txs]
+        discarded = 0
+        if min_date:
+            kept = [r for r in recs if r["date"] >= min_date]
+            discarded = len(recs) - len(kept)
+            recs = kept
+        added, updated = L.upsert(ledger, recs)
+        accounts.append({"item_id": str(item_id), "name": name, "type": str(acc.type),
+                         "mode": mode, "received": len(txs), "added": added,
+                         "updated": updated, "discarded": discarded})
+        state[str(acc.id)] = {"account_name": name, "item_id": str(item_id),
+                              "last_synced_at": run_started.isoformat()}
 
     iof_settings = iof.load_settings()
     iof_changed = set()

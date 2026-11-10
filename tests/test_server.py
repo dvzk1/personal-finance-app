@@ -162,6 +162,19 @@ def test_value_edit_shows_at_once_and_reaches_the_files(api, state, paths):
         "Lazer"], "o agente lê os arquivos"
 
 
+def test_row_edit_does_not_depend_on_the_whole_report(api):
+    """Validar a categoria de uma linha não pode exigir o relatório inteiro: com uma âncora
+    de saldo inválida no Config o relatório falha, e a edição tem de seguir."""
+    sheets.write_config("free_balance_anchor", {"date": "ontem"})
+    target = _uncategorized()
+    ok = api.post("/api/edit", json={"mode": "value", "ids": [target["id"]],
+                                     "category": "Lazer"})
+    assert ok.json()["ok"], ok.text
+    refused = api.post("/api/edit", json={"mode": "value", "ids": [target["id"]],
+                                          "category": "Inexistente"})
+    assert "categoria inexistente" in refused.json()["error"]
+
+
 def test_rule_edit_creates_the_rule_and_classifies(api):
     target = _uncategorized()
     words = target["description"].split()[0]
@@ -203,6 +216,15 @@ def test_refusals_reach_the_screen_as_messages(api):
         assert response.json()["ok"] is False and message in response.json()["error"]
 
 
+def test_spreadsheet_errors_reach_the_screen(api, monkeypatch):
+    def no_tab(*args):
+        raise sheets.SheetsError("aba InvestAssets não existe")
+    monkeypatch.setattr(operations, "sync", no_tab)
+    response = api.post("/api/invest/sync", json={})
+    assert response.status_code == 502
+    assert "InvestAssets não existe" in response.json()["error"]
+
+
 def test_unexpected_error_keeps_the_details_on_the_server(api, monkeypatch):
     def boom(data):
         raise RuntimeError("caminho/secreto")
@@ -221,6 +243,31 @@ def test_budget_is_saved_and_reported(api):
     assert B.load()["spending"]["recurring"]["Lazer"] == 321
     dashboard = api.get("/data/dashboard.json").json()
     assert dashboard["budgets"]["spending"]["recurring"]["Lazer"] == 321
+
+
+def test_saving_reuses_the_report_it_computed(api, monkeypatch):
+    plan = B.load()
+    plan["spending"]["recurring"]["Lazer"] = 654
+    builds = []
+    real_build = report.build
+    monkeypatch.setattr(report, "build", lambda **kw: builds.append(1) or real_build(**kw))
+    api.post("/api/budget", json=plan)
+    dashboard = api.get("/data/dashboard.json").json()
+    assert dashboard["budgets"]["spending"]["recurring"]["Lazer"] == 654
+    assert len(builds) == 1, "o relatório da gravação serve a leitura seguinte"
+
+
+def test_cached_report_does_not_outlive_its_day(api, monkeypatch):
+    """O relatório usa a data de hoje (ritmo do mês): no dia seguinte, recalcula."""
+    builds = []
+    real_build = report.build
+    monkeypatch.setattr(report, "build", lambda **kw: builds.append(1) or real_build(**kw))
+    api.get("/data/dashboard.json")
+    api.get("/data/dashboard.json")
+    tomorrow = server._today() + timedelta(days=1)
+    monkeypatch.setattr(server, "_today", lambda: tomorrow)
+    api.get("/data/dashboard.json")
+    assert len(builds) == 2
 
 
 def test_invest_apply_saves_and_refuses_an_unbalanced_destination(api):
@@ -279,6 +326,37 @@ def test_scheduled_run_reports_its_outcome_and_refreshes_the_report(api, state, 
     status = api.get("/api/sync/status").json()
     assert (status["last_ok"], status["last_error"]) == (False, "Pluggy fora do ar")
     assert api.post("/api/sync/run").status_code == 409, "desligada neste teste"
+
+
+def test_sync_that_fails_midway_still_shows_what_it_wrote(api, state, monkeypatch):
+    target = _uncategorized()
+    api.get("/data/dashboard.json")
+
+    def half_done():
+        L.save_ledger({**L.load_ledger(), target["id"]: {
+            **L.load_ledger()[target["id"]], "category": "Lazer"}})
+        raise RuntimeError("caiu depois de gravar")
+    monkeypatch.setattr(state.scheduler, "job", half_done)
+    state.scheduler.run_once()
+    assert state.scheduler.status["last_ok"] is False
+    assert _month_row(api, target)["category"] == "Lazer"
+
+
+def test_scheduled_job_goes_on_when_the_portfolio_side_fails(state, monkeypatch):
+    from finance import sync
+    monkeypatch.setattr(sync, "run", lambda days: {"added": 2, "updated": 0,
+                                                   "uncategorized": 1})
+    monkeypatch.setattr(categorize, "prepare", lambda: {"by_rule": 1, "by_map": 0})
+
+    def pluggy_down(**kwargs):
+        raise ConnectionError("investimentos fora do ar")
+    monkeypatch.setattr(operations, "sync", pluggy_down)
+
+    result = state.scheduler.run_once()
+
+    assert state.scheduler.status["last_ok"] is True
+    assert result["balances"] == {"error": "investimentos fora do ar"}
+    assert (config.REPORTS_DIR / "dashboard.json").exists(), "o relatório saiu"
 
 
 # ------------------------------------------------------------------ o app em si
