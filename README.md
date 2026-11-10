@@ -66,6 +66,11 @@ pasta de dados do seu sistema, fora do repositório (apagar o clone não leva os
 
 `FINANCE_DB=/outro/caminho.db` no `.env` usa outro arquivo.
 
+**Já usa a planilha?** Com o `SHEET_ID` ainda no `.env`, `uv run python -m finance.import_sheets`
+copia todas as abas para o banco local e confere linhas, soma do Ledger e Config. A planilha
+só é lida, nunca alterada. Depois tire o `SHEET_ID` do `.env` para o app passar a usar o banco
+local.
+
 ```bash
 uv run python -m finance.seed        # cria as tabelas e enche com dados fictícios
 uv run python main.py                # confere o banco e mostra as tabelas

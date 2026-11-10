@@ -33,6 +33,8 @@ pelo mesmo motivo do passo 4.
 > `data/seed/`. Na planilha, o histórico fica no *Histórico de versões*; no banco local, em
 > cópias automáticas (uma por dia e antes de regravar tabelas inteiras):
 > `uv run python -m finance.backup list|restore <n>|export <arq>|import <arq>`.
+> Para levar uma planilha para o banco local: `uv run python -m finance.import_sheets`
+> (só lê a planilha; confere linhas, soma do Ledger e Config).
 
 Para abrir o dashboard no dia a dia: **`./start.sh`** (atualiza os relatórios a partir do banco
 e sobe o front num comando só; `./start.sh --sync` puxa da Pluggy antes).
