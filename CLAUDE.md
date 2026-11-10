@@ -30,8 +30,9 @@ pelo mesmo motivo do passo 4.
 
 > Os dados **persistem automaticamente no banco** a cada `apply`/`sync`. Não há mais
 > `ledger.jsonl` para commitar — o git guarda só código, docs e os fixtures sintéticos de
-> `data/seed/`. Na planilha, o histórico fica no *Histórico de versões*; no banco local, não
-> há histórico além de cópias do arquivo.
+> `data/seed/`. Na planilha, o histórico fica no *Histórico de versões*; no banco local, em
+> cópias automáticas (uma por dia e antes de regravar tabelas inteiras):
+> `uv run python -m finance.backup list|restore <n>|export <arq>|import <arq>`.
 
 Para abrir o dashboard no dia a dia: **`./start.sh`** (atualiza os relatórios a partir do banco
 e sobe o front num comando só; `./start.sh --sync` puxa da Pluggy antes).

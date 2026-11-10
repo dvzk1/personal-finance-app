@@ -1,5 +1,6 @@
 import argparse
 
+from . import backup
 from . import ledger as L
 from . import sheets
 from .transaction_dates import date_migration_preview, load_timezone
@@ -31,6 +32,10 @@ def main() -> None:
 
     if args.dry_run or not changed_dates:
         return
+    if sheets.LOCAL:
+        saved = backup.create("antes-da-migracao")
+        if saved:
+            print(f"Cópia do banco antes de mudar as datas: {saved}")
     for transaction_id, expected_date in changed_dates.items():
         ledger[transaction_id]["date"] = expected_date
     L.save_ledger(ledger)

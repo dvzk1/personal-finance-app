@@ -78,7 +78,12 @@ reserva. A ordem por tipo de ativo é configurável em `QUOTE_PROVIDERS` (ver `.
 O `finance.invest report` busca o que estiver vencido; `finance.invest quotes --force`
 busca tudo na hora.
 
-Backup: o banco é um arquivo só. Copie-o.
+Backup: o app copia o banco sozinho para `backups/`, ao lado dele, uma vez por dia e antes
+de qualquer operação que regrava tabelas inteiras (`seed --force`, migração de datas,
+importação, restauração). `uv run python -m finance.backup list` lista as cópias e
+`finance.backup restore <número>` volta para uma delas (o estado atual vira uma cópia antes).
+Para usar em duas máquinas, não ponha o banco numa pasta sincronizada (iCloud, Dropbox): use
+um banco por máquina e `finance.backup export <arquivo>` / `import <arquivo>`.
 
 #### Opção B: Google Sheets
 
@@ -398,8 +403,8 @@ CLAUDE.md       # contrato de operação (lido pelo Claude Code a cada sessão)
 - `credentials.json` (chave da Service Account) e `.env` (SHEET_ID + credenciais Pluggy)
   **nunca devem ser commitados** — estão no `.gitignore`.
 - Seus dados financeiros vivem no **seu** banco (arquivo local ou planilha), não no repositório.
-- Backup: no banco local, copie o arquivo `finance.db`. No Google Sheets, há *Histórico de
-  versões* nativo (*Arquivo → Histórico de versões*).
+- Backup: no banco local, cópias automáticas em `backups/` (`finance.backup list|restore`).
+  No Google Sheets, há *Histórico de versões* nativo (*Arquivo → Histórico de versões*).
 - `BRAPI_TOKEN` fica no `.env`, como as outras chaves.
 - A API do dashboard só atende o próprio computador (`localhost`, `127.0.0.1`, `[::1]`) e só
   aceita gravação vinda do próprio dashboard. Outro site aberto no navegador recebe 403. Por

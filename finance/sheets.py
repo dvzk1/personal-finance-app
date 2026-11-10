@@ -449,6 +449,11 @@ def _read_config_values() -> list[list[str]]:
     return _ws(CONFIG_TAB).get_all_values()
 
 
+def config_keys() -> list[str]:
+    """Chaves presentes na aba Config, na ordem da aba."""
+    return [row[0] for row in _read_config_values()[1:] if row and row[0]]
+
+
 def read_config(key: str, default=None):
     """Lê um blob JSON (ou string) da aba Config pela chave."""
     for row in _read_config_values()[1:]:
@@ -571,9 +576,9 @@ def check() -> dict:
 # Com o backend SQLite, a mesma interface passa a gravar num arquivo local (ver
 # `config.BACKEND`). Fica no fim do módulo porque o backend local lê SCHEMAS daqui.
 INTERFACE = ("read_records", "write_records", "append_rows", "delete_row",
-             "read_columns", "update_fields", "update_changed_rows", "read_config",
-             "write_config", "ensure_tabs", "ensure_current_schema", "check",
-             "reset_cache")
+             "read_columns", "update_fields", "update_changed_rows", "config_keys",
+             "read_config", "write_config", "ensure_tabs", "ensure_current_schema",
+             "check", "reset_cache")
 # A implementação do Google continua acessível no modo local: os testes dela e o
 # importador da planilha usam estas, não as do módulo.
 GOOGLE = {_name: globals()[_name] for _name in INTERFACE}

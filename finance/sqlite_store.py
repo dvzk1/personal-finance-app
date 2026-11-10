@@ -16,6 +16,7 @@ A aba `Quotes` não tem motor de fórmula aqui: quem preenche o preço são os p
 import atexit
 import json
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import sheets
@@ -29,10 +30,27 @@ _NUMERIC = ("float", "fnum", "qnum")
 
 _conn = None
 _opening_changes: list[str] = []     # o que a abertura do arquivo precisou criar
+_path_override: Path | None = None   # outro arquivo, aberto por `opened()`
+_daily_checked: set[Path] = set()    # bancos que já passaram pela cópia diária
 
 
 def db_path() -> Path:
-    return config.db_path()
+    return _path_override or config.db_path()
+
+
+@contextmanager
+def opened(path: Path):
+    """Usa outro arquivo enquanto o bloco roda (importador, testes). Não mexe no banco
+    configurado: ao sair, a próxima operação volta a abrir `config.db_path()`."""
+    global _path_override
+    previous = _path_override
+    reset_cache()
+    _path_override = Path(path)
+    try:
+        yield
+    finally:
+        reset_cache()
+        _path_override = previous
 
 
 def _quote(name: str) -> str:
@@ -44,6 +62,12 @@ def _connect() -> sqlite3.Connection:
     if _conn is None:
         path = db_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path not in _daily_checked:
+            # primeira abertura do dia de um banco que já existe: cópia antes de qualquer
+            # gravação, no lugar do histórico de versões da planilha
+            _daily_checked.add(path)
+            from . import backup
+            backup.daily(path)
         _conn = sqlite3.connect(path, timeout=30)
         atexit.register(reset_cache)
         _conn.execute("PRAGMA journal_mode=WAL")
@@ -221,6 +245,11 @@ def update_changed_rows(tab: str, records: list[dict], changed_ids: set,
 
 
 # ---------------------------------------------------------------------------- Config
+def config_keys() -> list[str]:
+    return [row[0] for row in _connect().execute(
+        f"SELECT key FROM {_quote(sheets.CONFIG_TAB)} ORDER BY rowid")]
+
+
 def read_config(key: str, default=None):
     row = _connect().execute(
         f"SELECT value FROM {_quote(sheets.CONFIG_TAB)} WHERE key = ?", (key,)).fetchone()

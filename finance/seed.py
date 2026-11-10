@@ -21,7 +21,7 @@ from pathlib import Path
 
 import yaml
 
-from . import sheets
+from . import backup, sheets
 from . import taxonomy as T
 from .config import DEFAULT_TIMEZONE, SEED_DIR, db_path
 from .invest import accounts as ACC
@@ -144,6 +144,8 @@ def main() -> None:
             if busy:
                 sys.exit(f"Estas abas já têm dados: {', '.join(busy)}.\n"
                          "Use --force para sobrescrever.")
+        if sheets.LOCAL:
+            backup.create("antes-do-seed")
         print(f"Populando a carteira a partir de {src}...")
         _seed_invest(fixtures)
         print("\nPronto! Rode: uv run python -m finance.invest report")
@@ -168,6 +170,10 @@ def main() -> None:
             sys.exit(f"Estas abas já têm dados: {', '.join(busy)}.\n"
                      f"Use --force para sobrescrever ({where}).")
 
+    if sheets.LOCAL:
+        saved = backup.create("antes-do-seed")
+        if saved:
+            print(f"Cópia do banco atual: {saved}")
     fx = _read_fixtures(src)
     print(f"Populando a partir de {src}...")
     sheets.write_records("Ledger", fx["ledger"])
