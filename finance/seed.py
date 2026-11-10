@@ -203,8 +203,7 @@ def main() -> None:
     info = sheets.check()
     print(f"\nPronto! Banco de demonstração criado em '{info['title']}'.")
     print(f"  {info['url']}")
-    print("\nPróximo passo: uv run python -m finance.report "
-          "&& (cd frontend && npm run dev)")
+    print("\nPróximo passo: ./start.sh")
 
 
 if __name__ == "__main__":

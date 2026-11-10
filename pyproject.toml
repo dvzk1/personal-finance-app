@@ -9,10 +9,13 @@ dependencies = [
     "pyyaml>=6.0",
     "gspread>=6.0",
     "google-auth>=2.0",
+    "fastapi>=0.162.4",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "pytest>=9.2.0",
     "pytest-randomly>=5.1.0",
     "ruff>=0.17.4",
@@ -27,7 +30,12 @@ pythonpath = ["."]
 # para outro aparece logo. A seed sai no cabeçalho; repita com -p "randomly_seed=N"
 # ou desligue com -p no:randomly.
 addopts = "-m 'not sheets' --strict-markers"
-filterwarnings = ["error"]
+# O TestClient do Starlette avisa que vai trocar o httpx pelo httpx2; o aviso não é
+# sobre o nosso código e o httpx continua funcionando.
+filterwarnings = [
+    "error",
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:Warning",
+]
 markers = ["sheets: precisa da planilha real (SHEET_ID e credentials.json)"]
 
 # Só as regras do pyflakes (F): nome indefinido, import ou variável sem uso, f-string

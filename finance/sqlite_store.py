@@ -67,7 +67,8 @@ def _connect() -> sqlite3.Connection:
             _daily_checked.add(path)
             from . import backup
             backup.daily(path)
-        _conn = sqlite3.connect(path, timeout=30)
+        # O servidor chama de threads do pool, sempre sob a trava de escrita dele.
+        _conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
         atexit.register(reset_cache)
         _conn.execute("PRAGMA journal_mode=WAL")
         _opening_changes[:] = _create_missing(_conn)

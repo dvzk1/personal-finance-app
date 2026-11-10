@@ -44,6 +44,7 @@ novas regras. Um dashboard React (leitura + edição leve) visualiza tudo.
   `google-auth` (Google Sheets), `pyyaml`, `python-dotenv`.
 - **Dados:** SQLite local ou Google Sheets (fonte da verdade, um dos dois). Relatórios
   gerados localmente em `data/reports/`.
+- **API:** FastAPI + uvicorn (`finance/server.py`), só em `127.0.0.1`.
 - **Frontend:** Vite + React 18 + Tailwind v4 + Recharts + TanStack Table.
 
 ## Setup / Onboarding
@@ -160,12 +161,16 @@ cd frontend && npm install
 ## Operação (fluxo recorrente)
 
 Para abrir o app no dia a dia, um comando só (atualiza os relatórios a partir do banco e sobe
-o dashboard):
+a API e o dashboard):
 
 ```bash
 ./start.sh            # atualiza + dashboard em http://localhost:5273
 ./start.sh --sync     # puxa transações novas da Pluggy antes de atualizar
 ```
+
+A tela fala com a API em `finance/server.py` (porta 5274, `FINANCE_PORT` muda), que o
+`start.sh` sobe junto; o Vite repassa `/api` e `/data` para ela. Para subir à mão, em dois
+terminais: `uv run python -m finance.server` e `cd frontend && npm run dev`.
 
 Ou os passos individuais, em linguagem natural com o Claude Code ou direto pelo CLI:
 
@@ -395,6 +400,7 @@ finance/        # pipeline Python (sync, rules, categorize, report, sheets, seed
   sheets.py     # interface do banco + implementação Google Sheets
   sqlite_store.py # implementação SQLite local da mesma interface
   seed.py       # inicializa o banco com os dados de demonstração
+  server.py     # API do dashboard (FastAPI): edição, orçamento, carteira, relatórios
   invest/       # carteira: política, ativos, movimentações, cotações, aporte, Pluggy
     quote_sources/ # provedores de cotação do banco local (Yahoo, brapi, Banco Central)
 frontend/       # dashboard React (Vite)
