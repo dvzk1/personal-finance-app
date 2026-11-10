@@ -38,6 +38,7 @@ chave (`credentials*.json`, `service_account*.json`, `.env.*`, `*.pem`). Ainda a
 1. Crie uma branch a partir da `main` (`git switch -c minha-feature`).
 2. Faça as mudanças e rode os testes:
    ```bash
+   uv run ruff check
    uv run pytest
    cd frontend && npm test && npm run build
    ```

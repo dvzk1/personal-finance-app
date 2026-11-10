@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test src/lib/*.test.js",
+    "check": "node scripts/check-undefined.mjs",
+    "test": "npm run check && node --test src/lib/*.test.js",
     "preview": "vite preview --port 5273"
   },
   "dependencies": {
@@ -19,6 +20,9 @@
     "recharts": "^2.15.0"
   },
   "devDependencies": {
+    "@babel/parser": "^7.29.13",
+    "@babel/traverse": "^7.29.13",
+    "@babel/types": "^7.29.11",
     "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "tailwindcss": "^4.0.0",

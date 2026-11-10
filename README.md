@@ -367,8 +367,9 @@ CLAUDE.md       # contrato de operação (lido pelo Claude Code a cada sessão)
 ## Testes
 
 ```bash
+uv run ruff check       # lint do Python (regras do pyflakes)
 uv run pytest           # backend (sem rede, sem .env e sem credentials.json)
-cd frontend && npm test # funções puras do frontend
+cd frontend && npm test # import faltando, módulo órfão e testes das funções puras
 ```
 
 A CI roda os dois, mais o build do frontend, em todo PR. A suíte do backend roda em ordem

@@ -5,7 +5,6 @@ de correção da migração. Rode: uv run python -m pytest tests/ -q  (ou uv run
 """
 
 import json
-from pathlib import Path
 
 from finance import sheets
 from finance.config import SEED_DIR

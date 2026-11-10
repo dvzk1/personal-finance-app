@@ -15,6 +15,7 @@ dependencies = [
 dev = [
     "pytest>=9.2.0",
     "pytest-randomly>=5.1.0",
+    "ruff>=0.17.4",
 ]
 
 [tool.pytest.ini_options]
@@ -28,3 +29,8 @@ pythonpath = ["."]
 addopts = "-m 'not sheets' --strict-markers"
 filterwarnings = ["error"]
 markers = ["sheets: precisa da planilha real (SHEET_ID e credentials.json)"]
+
+# Só as regras do pyflakes (F): nome indefinido, import ou variável sem uso, f-string
+# sem placeholder. Estilo fica de fora.
+[tool.ruff.lint]
+select = ["F"]
