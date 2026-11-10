@@ -363,6 +363,9 @@ CLAUDE.md       # contrato de operação (lido pelo Claude Code a cada sessão)
   **nunca devem ser commitados** — estão no `.gitignore`.
 - Seus dados financeiros vivem na **sua** planilha do Google Sheets, não no repositório.
 - Backup: o Google Sheets mantém *Histórico de versões* nativo (*Arquivo → Histórico de versões*).
+- A API do dashboard só atende o próprio computador (`localhost`, `127.0.0.1`, `[::1]`) e só
+  aceita gravação vinda do próprio dashboard. Outro site aberto no navegador recebe 403. Por
+  isso o dashboard não abre por IP da rede (`vite --host`): ele não foi feito para isso.
 
 ## Testes
 

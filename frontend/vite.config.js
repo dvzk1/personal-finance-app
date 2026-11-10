@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { rejectReason } from './src/lib/apiGuard.js'
 
 // Fonte da verdade dos dados = Google Sheets (via pipeline Python). Aqui o middleware só
 // lê os relatórios gerados localmente e delega escritas ao Python, que fala com o Sheets.
@@ -245,6 +246,12 @@ function financeServer() {
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = (req.url || '').split('?')[0]
+        if (url.startsWith('/api/') || url.startsWith('/data/')) {
+          const reason = rejectReason({
+            method: req.method, host: req.headers.host, origin: req.headers.origin,
+            secFetchSite: req.headers['sec-fetch-site'] })
+          if (reason) return json(res, 403, { ok: false, error: reason })
+        }
 
         // ---- leitura ao vivo dos relatórios
         if (url.startsWith('/data/')) {
