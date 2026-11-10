@@ -58,7 +58,7 @@ def test_quote_price_tolerates_formula_errors():
     assert sheets._cell_to_val("qnum", "3.627,35") == 3627.35
 
 
-def test_migration_creates_missing_invest_tabs():
+def test_migration_creates_missing_invest_tabs(monkeypatch):
     from tests.test_schema_migration import FakeSheet, FakeWorksheet
 
     worksheets = [FakeWorksheet(tab, [name for name, _ in schema])
@@ -66,9 +66,12 @@ def test_migration_creates_missing_invest_tabs():
     worksheets.append(FakeWorksheet("Config", ["key", "value"]))
     config = {"schema_version": 4, "timezone": "America/Sao_Paulo"}
     sheets.open_sheet = lambda: FakeSheet(worksheets)
-    sheets.read_config = lambda key, default=None: config.get(key, default)
-    sheets.write_config = lambda key, value: config.__setitem__(key, value)
-    sheets.reset_cache = lambda: None
+    # a implementação do Google chama as próprias funções por sheets.GOOGLE
+    monkeypatch.setitem(sheets.GOOGLE, "read_config",
+                        lambda key, default=None: config.get(key, default))
+    monkeypatch.setitem(sheets.GOOGLE, "write_config",
+                        lambda key, value: config.__setitem__(key, value))
+    monkeypatch.setitem(sheets.GOOGLE, "reset_cache", lambda: None)
 
     changes = sheets.ensure_current_schema()
 

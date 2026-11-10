@@ -37,7 +37,7 @@ class FakeSheet:
         return worksheet
 
 
-def test_schema_migration_adds_missing_fields():
+def test_schema_migration_adds_missing_fields(monkeypatch):
     worksheets = [
         FakeWorksheet(tab, [name for name, _ in schema]
                       if tab != "Ledger"
@@ -49,9 +49,12 @@ def test_schema_migration_adds_missing_fields():
     fake_sheet = FakeSheet(worksheets)
     config = {"schema_version": 1}
     sheets.open_sheet = lambda: fake_sheet
-    sheets.read_config = lambda key, default=None: config.get(key, default)
-    sheets.write_config = lambda key, value: config.__setitem__(key, value)
-    sheets.reset_cache = lambda: None
+    # a implementação do Google chama as próprias funções por sheets.GOOGLE
+    monkeypatch.setitem(sheets.GOOGLE, "read_config",
+                        lambda key, default=None: config.get(key, default))
+    monkeypatch.setitem(sheets.GOOGLE, "write_config",
+                        lambda key, value: config.__setitem__(key, value))
+    monkeypatch.setitem(sheets.GOOGLE, "reset_cache", lambda: None)
 
     changes = sheets.ensure_current_schema()
 
@@ -69,6 +72,21 @@ def test_schema_migration_adds_missing_fields():
     assert sheets.ensure_current_schema() == []
 
 
-if __name__ == "__main__":
-    test_schema_migration_adds_missing_fields()
-    print("ok  test_schema_migration_adds_missing_fields")
+def test_google_implementation_never_falls_into_the_local_backend(local_db, monkeypatch):
+    """No modo local os nomes do módulo apontam para o SQLite. A migração do Google tem
+    de gravar na planilha, não no arquivo local."""
+    worksheets = [FakeWorksheet(tab, [name for name, _ in schema])
+                  for tab, schema in sheets.SCHEMAS.items()]
+    worksheets.append(FakeWorksheet("Config", ["key", "value"]))
+    config = {}
+    monkeypatch.setattr(sheets, "open_sheet", lambda: FakeSheet(worksheets))
+    monkeypatch.setitem(sheets.GOOGLE, "read_config",
+                        lambda key, default=None: config.get(key, default))
+    monkeypatch.setitem(sheets.GOOGLE, "write_config",
+                        lambda key, value: config.__setitem__(key, value))
+    monkeypatch.setitem(sheets.GOOGLE, "reset_cache", lambda: None)
+
+    sheets.GOOGLE["ensure_current_schema"]()
+
+    assert config["schema_version"] == sheets.SCHEMA_VERSION
+    assert sheets.read_config("schema_version") is None, "o banco local não foi tocado"

@@ -428,7 +428,7 @@ def update_changed_rows(tab: str, records: list[dict], changed_ids: set,
     # invariante mantido por write_records: planilha tem len(records)+1 linhas.
     # Se divergir, alguém mexeu na estrutura -> reescreve tudo (seguro).
     if ws.row_count != len(records) + 1:
-        write_records(tab, records)
+        GOOGLE["write_records"](tab, records)
         return -1
     reqs = []
     for i, rec in enumerate(records):
@@ -510,7 +510,7 @@ def ensure_tabs() -> None:
                 sh.del_worksheet(ws)
             except gspread.exceptions.APIError:
                 pass
-    reset_cache()
+    GOOGLE["reset_cache"]()
 
 
 @_retry
@@ -524,8 +524,8 @@ def ensure_current_schema() -> list[str]:
                                 value_input_option="RAW")
         worksheets[CONFIG_TAB] = config_worksheet
     else:
-        schema_version = read_config("schema_version", 0)
-        configured_timezone = read_config("timezone")
+        schema_version = GOOGLE["read_config"]("schema_version", 0)
+        configured_timezone = GOOGLE["read_config"]("timezone")
         if schema_version == SCHEMA_VERSION and configured_timezone is not None:
             return []
     changes = []
@@ -557,11 +557,11 @@ def ensure_current_schema() -> list[str]:
         worksheet.update(values=[missing_header], range_name=header_range,
                          value_input_option="RAW")
         changes.extend(f"coluna {tab}.{name}" for name in missing_header)
-    reset_cache()
-    if read_config("timezone") is None:
-        write_config("timezone", DEFAULT_TIMEZONE)
+    GOOGLE["reset_cache"]()
+    if GOOGLE["read_config"]("timezone") is None:
+        GOOGLE["write_config"]("timezone", DEFAULT_TIMEZONE)
         changes.append("Config.timezone")
-    write_config("schema_version", SCHEMA_VERSION)
+    GOOGLE["write_config"]("schema_version", SCHEMA_VERSION)
     return changes
 
 
@@ -580,11 +580,9 @@ INTERFACE = ("read_records", "write_records", "append_rows", "delete_row",
              "read_config", "write_config", "ensure_tabs", "ensure_current_schema",
              "check", "reset_cache")
 # A implementação do Google continua acessível no modo local: os testes dela e o
-# importador da planilha usam estas, não as do módulo. Cuidado: elas chamam umas às outras
-# pelo nome do módulo, então no modo local `GOOGLE["update_changed_rows"]`,
-# `["ensure_tabs"]` e `["ensure_current_schema"]` cairiam no SQLite. Só as de leitura
-# (`read_records`, `read_config`, `config_keys`) são seguras isoladas; os testes trocam
-# todas juntas (fixture `google_backend`).
+# importador da planilha usam estas, não as do módulo. Por isso, dentro da implementação
+# do Google, uma função chama a outra por `GOOGLE[...]` e nunca pelo nome do módulo, que no
+# modo local aponta para o SQLite.
 GOOGLE = {_name: globals()[_name] for _name in INTERFACE}
 LOCAL = BACKEND == "sqlite"
 if LOCAL:
