@@ -161,16 +161,17 @@ cd frontend && npm install
 ## Operação (fluxo recorrente)
 
 Para abrir o app no dia a dia, um comando só (atualiza os relatórios a partir do banco e sobe
-a API e o dashboard):
+o app):
 
 ```bash
-./start.sh            # atualiza + dashboard em http://localhost:5273
+./start.sh            # atualiza + app em http://localhost:5273
 ./start.sh --sync     # puxa transações novas da Pluggy antes de atualizar
+./start.sh --dev      # para mexer na tela: Vite com recarga em http://localhost:5173
 ```
 
-A tela fala com a API em `finance/server.py` (porta 5274, `FINANCE_PORT` muda), que o
-`start.sh` sobe junto; o Vite repassa `/api` e `/data` para ela. Para subir à mão, em dois
-terminais: `uv run python -m finance.server` e `cd frontend && npm run dev`.
+O app é um processo só, `finance/server.py`: serve o build do frontend, a API e os
+relatórios. Ele também roda como servidor próprio (acesso pelo celular via Tailscale, com
+senha) e sincroniza com a Pluggy sozinho; veja [`docs/SERVER.md`](docs/SERVER.md).
 
 Ou os passos individuais, em linguagem natural com o Claude Code ou direto pelo CLI:
 

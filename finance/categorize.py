@@ -46,7 +46,9 @@ def _anomaly(rec: dict, rule_id: str, ledger: dict) -> bool:
 
 
 # --------------------------------------------------------------------------- prepare
-def prepare() -> None:
+def prepare() -> dict:
+    """Aplica regras e o mapa da Pluggy no que está sem categoria e escreve o arquivo de
+    trabalho do agente (TO_CATEGORIZE_FILE). Devolve as contagens."""
     ensure_dirs()
     sheets.ensure_current_schema()
     tax = T.load()
@@ -141,14 +143,21 @@ def prepare() -> None:
     TO_CATEGORIZE_FILE.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
-    print(f"Aplicado agora: {by_rule} por regra, {by_map} por mapa-Pluggy, "
-          f"{still} ainda sem categoria.")
-    print(f"Provisórias a confirmar (mapa-Pluggy): {len(prov)} | "
-          f"sem subcategoria: {sum(b['count'] for b in need_sub.values())} | "
-          f"anomalias: {len(needs_review)}")
-    print(f"\nDetalhes em: {TO_CATEGORIZE_FILE}")
-    print("Agente: leia esse arquivo, agrupe e proponha ao usuário; depois grave "
-          f"as decisões em {DECISIONS_FILE} e rode `apply --learn`.")
+    return {"by_rule": by_rule, "by_map": by_map, "still": still,
+            "provisional": len(prov),
+            "needs_subcategory": sum(b["count"] for b in need_sub.values()),
+            "anomalies": len(needs_review)}
+
+
+def prepare_summary(result: dict) -> list[str]:
+    return [f"Aplicado agora: {result['by_rule']} por regra, {result['by_map']} por "
+            f"mapa-Pluggy, {result['still']} ainda sem categoria.",
+            f"Provisórias a confirmar (mapa-Pluggy): {result['provisional']} | "
+            f"sem subcategoria: {result['needs_subcategory']} | "
+            f"anomalias: {result['anomalies']}",
+            f"\nDetalhes em: {TO_CATEGORIZE_FILE}",
+            "Agente: leia esse arquivo, agrupe e proponha ao usuário; depois grave "
+            f"as decisões em {DECISIONS_FILE} e rode `apply --learn`."]
 
 
 # ----------------------------------------------------------------------------- apply
@@ -413,7 +422,7 @@ def main() -> None:
                     help="(apply) já regera os relatórios no mesmo processo")
     args = ap.parse_args()
     if args.command == "prepare":
-        prepare()
+        print("\n".join(prepare_summary(prepare())))
     elif args.command == "apply":
         apply(args.learn, args.report)
     elif args.command == "reapply":

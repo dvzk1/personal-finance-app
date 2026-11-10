@@ -56,9 +56,12 @@ def _locate(precisa_tags: bool) -> tuple[dict, dict]:
     return rows, tags
 
 
-def apply_edits(edits: list[dict]) -> dict:
-    """edits = [{"ids": [...], "fields": {...}}]. Retorna o que foi gravado."""
-    tax = _taxonomy()
+def apply_edits(edits: list[dict], taxonomy: dict | None = None) -> dict:
+    """edits = [{"ids": [...], "fields": {...}}]. Retorna o que foi gravado.
+
+    A categoria é conferida contra `taxonomy` (o servidor passa a do relatório que já
+    tem); sem ela, contra a do dashboard.json em disco."""
+    tax = taxonomy if taxonomy is not None else _taxonomy()
     for edit in edits:
         _validate(edit.get("fields") or {}, tax)
 

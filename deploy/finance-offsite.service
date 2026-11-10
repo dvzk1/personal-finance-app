@@ -1,0 +1,10 @@
+# Roda deploy/offsite-backup.sh; disparado por finance-offsite.timer.
+[Unit]
+Description=Finance Control: cópia cifrada do banco para fora da máquina
+
+[Service]
+Type=oneshot
+User=finance
+WorkingDirectory=/opt/personal-finance-app
+EnvironmentFile=/etc/finance-control.env
+ExecStart=/opt/personal-finance-app/deploy/offsite-backup.sh

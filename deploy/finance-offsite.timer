@@ -1,0 +1,12 @@
+# Uma cópia cifrada por dia, às 4h (ou assim que a máquina ligar, se estava desligada).
+#   sudo cp deploy/finance-offsite.* /etc/systemd/system/
+#   sudo systemctl enable --now finance-offsite.timer
+[Unit]
+Description=Finance Control: cópia cifrada diária
+
+[Timer]
+OnCalendar=*-*-* 04:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

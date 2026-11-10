@@ -37,7 +37,9 @@ pelo mesmo motivo do passo 4.
 > (só lê a planilha; confere linhas, soma do Ledger e Config).
 
 Para abrir o dashboard no dia a dia: **`./start.sh`** (atualiza os relatórios a partir do banco
-e sobe o front num comando só; `./start.sh --sync` puxa da Pluggy antes).
+e sobe o app em http://localhost:5273; `./start.sh --sync` puxa da Pluggy antes). O app é o
+`finance/server.py`, que percebe o que você gravar pela CLI enquanto ele está aberto
+(no banco local; na planilha, em até 30 s). Detalhes em `docs/SERVER.md`.
 
 Comandos úteis de inspeção (só leitura, seguros):
 ```bash

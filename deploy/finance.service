@@ -1,0 +1,29 @@
+# Finance Control como serviço (modo servidor próprio). Veja docs/SERVER.md.
+#
+# Instalar:
+#   sudo cp deploy/finance.service /etc/systemd/system/
+#   sudo systemctl edit finance          # ajuste User e WorkingDirectory se preciso
+#   sudo systemctl enable --now finance
+[Unit]
+Description=Finance Control
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=finance
+WorkingDirectory=/opt/personal-finance-app
+# FINANCE_HOST, FINANCE_TOKEN, FINANCE_SYNC_SCHEDULE=1 e as credenciais da Pluggy.
+# Fora do repositório, legível só pelo usuário do serviço (chmod 600).
+EnvironmentFile=/etc/finance-control.env
+ExecStart=/usr/bin/env uv run --frozen python -m finance.server
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+# o banco e as cópias (pasta de dados do usuário), os relatórios e o cache do uv
+ReadWritePaths=/opt/personal-finance-app/data /home/finance/.local/share/finance-control /home/finance/.cache/uv
+
+[Install]
+WantedBy=multi-user.target

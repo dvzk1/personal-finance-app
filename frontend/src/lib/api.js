@@ -7,15 +7,27 @@ async function getJSON(url) {
   }
   return r.json()
 }
-async function postJSON(url, body) {
+// Toda gravação leva o token da sessão do servidor (finance/server.py). Ele muda quando o
+// servidor reinicia; aí a primeira gravação volta 403 e repete com o token novo.
+let session = null
+const sessionToken = (renew = false) => {
+  if (renew || !session) session = getJSON('/api/session').then((s) => s.token)
+    .catch((e) => { session = null; throw e })
+  return session
+}
+
+async function postJSON(url, body, retried = false) {
   const r = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json',
+      'X-Finance-Token': await sessionToken(retried) },
     body: JSON.stringify(body),
   })
   const data = await r.json().catch(() => ({}))
+  if (r.status === 403 && !retried && /token da sessão/.test(data.error || ''))
+    return postJSON(url, body, true)
   if (!r.ok || data.ok === false) {
-    throw new Error(data.error || data.stderr || `Falha (${r.status})`)
+    throw new Error(data.error || `Falha (${r.status})`)
   }
   return data
 }

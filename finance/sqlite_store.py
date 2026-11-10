@@ -104,6 +104,12 @@ def reset_cache() -> None:
     _conn = None
 
 
+def data_version() -> int:
+    """Muda quando outro processo (a CLI, o agente) grava no banco. As gravações desta
+    conexão não mudam o número: quem as faz sabe que gravou."""
+    return _connect().execute("PRAGMA data_version").fetchone()[0]
+
+
 # --------------------------------------------------------------------- coerção de tipos
 def _to_db(kind: str, value):
     if value is None:

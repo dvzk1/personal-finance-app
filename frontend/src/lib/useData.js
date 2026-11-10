@@ -185,29 +185,15 @@ export function useData() {
 
   useEffect(() => subscribe(setPendingSaves), [])
 
-  // O relatório roda adiado no servidor. Recarregar antes dele terminar leria o
-  // dashboard velho e desfaria a mudança na tela, então esperamos o arquivo
-  // anunciar que foi regerado.
-  const aguardaRelatorio = useCallback(async (desde) => {
-    for (let tentativa = 0; tentativa < 12; tentativa++) {
-      await new Promise((pronto) => setTimeout(pronto, 700))
-      try {
-        const d = await getDashboard()
-        if (Date.parse(d.generated_at) > desde) {
-          await refreshRef.current?.()
-          return
-        }
-      } catch { /* relatório sendo reescrito; tenta de novo */ }
-    }
-  }, [])
-
+  // O servidor recalcula o relatório na primeira leitura depois de uma gravação, então
+  // basta recarregar quando a fila de saída esvazia.
   useEffect(() => {
     configure({
       onError: (_payload, e) => setError('Erro ao salvar: ' + e.message),
-      onIdle: () => aguardaRelatorio(Date.now()),
+      onIdle: () => refreshRef.current?.(),
     })
     drain()   // retoma o que ficou pendente de uma aba fechada no meio
-  }, [aguardaRelatorio])
+  }, [])
 
   const saveEdit = useCallback(async (payload) => {
     // fila do Claude não mexe no ledger: espera a resposta (quem chama recarrega).

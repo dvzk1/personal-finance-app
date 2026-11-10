@@ -89,3 +89,8 @@ def fetch_transactions(
         if not after:
             break
     return out
+
+
+def next_auto_sync(client: ApiClient, item_id: str):
+    """Quando a Pluggy vai atualizar o item sozinha (datetime UTC), ou None."""
+    return pluggy_sdk.ItemsApi(client).items_retrieve(item_id).next_auto_sync_at

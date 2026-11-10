@@ -71,10 +71,15 @@ def conflicts(ledger: dict) -> list[tuple[dict, dict]]:
             and (key := (rec.get("account_id"), rec.get("date"))) in iof_lines]
 
 
+def conflict_lines(ledger: dict) -> list[str]:
+    return [f"IOF duplicado? {rec['date']} {rec['description']} ({rec['id']}) tem estimativa "
+            f"e a Pluggy trouxe {line['description']} ({line['id']}). Remova um dos dois."
+            for rec, line in conflicts(ledger)]
+
+
 def report_conflicts(ledger: dict) -> None:
-    for rec, line in conflicts(ledger):
-        print(f"  IOF duplicado? {rec['date']} {rec['description']} ({rec['id']}) tem estimativa "
-              f"e a Pluggy trouxe {line['description']} ({line['id']}). Remova um dos dois.")
+    for line in conflict_lines(ledger):
+        print(f"  {line}")
 
 
 def main() -> None:

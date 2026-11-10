@@ -41,19 +41,17 @@ def _load_min_date() -> str | None:
     return value
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description="Sincroniza transações da Pluggy.")
-    ap.add_argument("--backfill", action="store_true", help="Puxa histórico completo (~12 meses).")
-    ap.add_argument("--days", type=int, default=BACKFILL_DAYS, help="Janela de backfill (máx ~365).")
-    args = ap.parse_args()
+def run(days: int = BACKFILL_DAYS, backfill: bool = False) -> dict:
+    """Puxa as transações da Pluggy para o Ledger e devolve o que entrou por conta.
 
+    Sem `backfill`, cada conta já sincronizada busca só o que entrou desde o último sync
+    (com 2 dias de folga; o upsert deduplica). Conta nova ou `backfill` buscam `days`."""
     ensure_dirs()
     items = pc.item_ids()
     if not items:
-        raise SystemExit("ITEM_IDS vazio no .env. Adicione o(s) ID(s) do(s) item(ns).")
+        raise FinanceError("ITEM_IDS vazio no .env. Adicione o(s) ID(s) do(s) item(ns).")
     sheets.ensure_current_schema()
 
-    print("Autenticando na Pluggy...")
     api_key = pc.get_api_key()
     state = _load_state()
     ledger = L.load_ledger()
@@ -62,21 +60,17 @@ def main() -> None:
     min_date = _load_min_date()
     run_started = datetime.now(timezone.utc)
 
-    if min_date:
-        print(f"Piso de data ativo: descartando lançamentos anteriores a {min_date}.")
-
-    total_added = total_updated = total_discarded = 0
+    accounts = []
     with pc.build_client(api_key) as client:
         for item_id in items:
-            print(f"=== Item {item_id} ===")
             for acc in pc.list_accounts(client, item_id):
                 acc_id = str(acc.id)
                 name = acc.marketing_name or acc.name
                 st = state.get(acc_id)
-                if args.backfill or st is None:
-                    var_from = datetime.now(timezone.utc) - timedelta(days=args.days)
+                if backfill or st is None:
+                    var_from = datetime.now(timezone.utc) - timedelta(days=days)
                     created_at_from = None
-                    mode = f"backfill {args.days}d"
+                    mode = f"backfill {days}d"
                 else:
                     last = datetime.fromisoformat(st["last_synced_at"])
                     created_at_from = last - timedelta(days=2)  # overlap; upsert deduplica
@@ -92,13 +86,11 @@ def main() -> None:
                     kept = [r for r in recs if r["date"] >= min_date]
                     discarded = len(recs) - len(kept)
                     recs = kept
-                a, u = L.upsert(ledger, recs)
-                total_added += a
-                total_updated += u
-                total_discarded += discarded
-                suffix = f", -{discarded} antes do piso" if discarded else ""
-                print(f"  {name} [{acc.type}] ({mode}): "
-                      f"{len(txs)} recebidas, +{a} novas, ~{u} atualizadas{suffix}")
+                added, updated = L.upsert(ledger, recs)
+                accounts.append({"item_id": str(item_id), "name": name,
+                                 "type": str(acc.type), "mode": mode,
+                                 "received": len(txs), "added": added,
+                                 "updated": updated, "discarded": discarded})
                 state[acc_id] = {
                     "account_name": name,
                     "item_id": str(item_id),
@@ -112,16 +104,45 @@ def main() -> None:
 
     L.save_ledger(ledger)
     _save_state(state)
-    print(f"\nLedger: {len(ledger)} transações (+{total_added} novas, ~{total_updated} atualizadas).")
-    if total_discarded:
-        print(f"{total_discarded} descartadas por serem anteriores a {min_date}.")
-    if iof_changed:
-        print(f"{len(iof_changed)} com IOF estimado somado (Config[iof]).")
-    if iof_settings:
-        iof.report_conflicts(ledger)
-    uncat = sum(1 for r in ledger.values() if not r["category"])
-    if uncat:
-        print(f"{uncat} sem categoria → rode a skill finance-categorize.")
+    return {"accounts": accounts, "total": len(ledger), "min_date": min_date,
+            "added": sum(a["added"] for a in accounts),
+            "updated": sum(a["updated"] for a in accounts),
+            "discarded": sum(a["discarded"] for a in accounts),
+            "iof_changed": len(iof_changed),
+            "iof_conflicts": iof.conflict_lines(ledger) if iof_settings else [],
+            "uncategorized": sum(1 for r in ledger.values() if not r["category"])}
+
+
+def summary(result: dict) -> list[str]:
+    lines = []
+    if result["min_date"]:
+        lines.append(f"Piso de data ativo: descartando lançamentos anteriores a "
+                     f"{result['min_date']}.")
+    for a in result["accounts"]:
+        suffix = f", -{a['discarded']} antes do piso" if a["discarded"] else ""
+        lines.append(f"  {a['name']} [{a['type']}] ({a['mode']}): {a['received']} "
+                     f"recebidas, +{a['added']} novas, ~{a['updated']} atualizadas{suffix}")
+    lines.append(f"\nLedger: {result['total']} transações (+{result['added']} novas, "
+                 f"~{result['updated']} atualizadas).")
+    if result["discarded"]:
+        lines.append(f"{result['discarded']} descartadas por serem anteriores a "
+                     f"{result['min_date']}.")
+    if result["iof_changed"]:
+        lines.append(f"{result['iof_changed']} com IOF estimado somado (Config[iof]).")
+    lines += [f"  {line}" for line in result["iof_conflicts"]]
+    if result["uncategorized"]:
+        lines.append(f"{result['uncategorized']} sem categoria → rode a skill "
+                     "finance-categorize.")
+    return lines
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Sincroniza transações da Pluggy.")
+    ap.add_argument("--backfill", action="store_true", help="Puxa histórico completo (~12 meses).")
+    ap.add_argument("--days", type=int, default=BACKFILL_DAYS, help="Janela de backfill (máx ~365).")
+    args = ap.parse_args()
+    print("Sincronizando com a Pluggy...")
+    print("\n".join(summary(run(args.days, args.backfill))))
 
 
 if __name__ == "__main__":
