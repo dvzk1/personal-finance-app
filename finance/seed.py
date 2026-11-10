@@ -144,7 +144,7 @@ def main() -> None:
             if busy:
                 sys.exit(f"Estas abas já têm dados: {', '.join(busy)}.\n"
                          "Use --force para sobrescrever.")
-        if sheets.LOCAL:
+        if sheets.LOCAL and _non_empty_tabs():
             backup.create("antes-do-seed")
         print(f"Populando a carteira a partir de {src}...")
         _seed_invest(fixtures)
@@ -170,10 +170,8 @@ def main() -> None:
             sys.exit(f"Estas abas já têm dados: {', '.join(busy)}.\n"
                      f"Use --force para sobrescrever ({where}).")
 
-    if sheets.LOCAL:
-        saved = backup.create("antes-do-seed")
-        if saved:
-            print(f"Cópia do banco atual: {saved}")
+    if sheets.LOCAL and _non_empty_tabs():
+        print(f"Cópia do banco atual: {backup.create('antes-do-seed')}")
     fx = _read_fixtures(src)
     print(f"Populando a partir de {src}...")
     sheets.write_records("Ledger", fx["ledger"])

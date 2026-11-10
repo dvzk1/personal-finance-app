@@ -147,3 +147,12 @@ def test_local_backend_writes_to_the_chosen_file(tmp_path):
             "print(sorted(ledger.load_ledger()), sheets.check()['title'])")
     assert _run(code, tmp_path, FINANCE_DB=str(path)) == "['a'] app.db"
     assert path.exists()
+
+
+@pytest.mark.parametrize("first", ["finance.sqlite_store", "finance.backup", "finance.sheets"])
+def test_local_backend_loads_whichever_module_comes_first(tmp_path, first):
+    """`python -m finance.backup` importa o banco local antes do `sheets`: a troca das
+    funções não pode depender da ordem."""
+    code = (f"import {first}; from finance import sheets, sqlite_store;"
+            "print(sheets.read_records is sqlite_store.read_records)")
+    assert _run(code, tmp_path, FINANCE_DB=str(tmp_path / "a.db")) == "True"

@@ -327,9 +327,10 @@ usuário e nunca devem entrar no repositório.
 ## Taxonomia
 
 **Não está no código.** Categorias, subcategorias, tratamento, cor e ícone vivem nas abas
-`Taxonomy` e `SubcategoryMeta` da planilha, e cada pessoa tem as suas. Para ver as atuais:
+`Taxonomy` e `SubcategoryMeta` do banco, e cada pessoa tem as suas. Para ver as atuais:
 
 ```bash
+uv run python -m finance.admin taxonomy list  # categorias, tratamento, cor, ícone, subs
 uv run python -m finance.show stats          # contadores por categoria
 ```
 
@@ -367,9 +368,23 @@ Ao montar o valor com o usuário:
 
 `data/seed/taxonomy.yaml` é só a **semente de demonstração**, para quem começa do zero.
 
-Ao adicionar ou renomear categorias, avise o Claude para reclassificar o que for preciso
-e para conferir se as regras da aba `Rules` e o mapa da `PluggyMap` continuam apontando
-para nomes que existem.
+Para mudar a taxonomia, as regras, o mapa da Pluggy ou as chaves de `Config` sem tela, use
+`uv run python -m finance.admin` (vale nos dois backends; `--help` em cada grupo):
+
+```bash
+uv run python -m finance.admin taxonomy add "Pets" Ração Veterinário --treatment fluxo
+uv run python -m finance.admin taxonomy rename "Alimentação" --sub Restaurante "Restaurantes"
+uv run python -m finance.admin taxonomy remove "Pets" --sub Veterinário
+uv run python -m finance.admin rules set r_0003 category=Lazer subcategory=Viagem
+uv run python -m finance.admin rules move r_0003 1
+uv run python -m finance.admin pluggy-map set "Food delivery" Alimentação Delivery
+uv run python -m finance.admin config set iof '{"rate": 0.035, "match": ["LOJA"]}'
+```
+
+`rename` leva o nome novo a lançamentos (e partes de divisão), regras, mapa da Pluggy, cores,
+orçamento e subcategorias de destino da carteira. `remove` recusa o que está em uso e diz
+onde: reclassifique antes. Depois de mexer em regras, rode `finance.categorize` e
+`finance.report`; depois de renomear, só `finance.report`.
 
 ---
 
@@ -387,8 +402,8 @@ Entradas com "APLICAÇÃO COMPROMISSADA"/"RECOMPRA COMPROMISSADA" → `Investime
 A Pluggy às vezes grava o valor em USD em vez de BRL. Quando o valor real em BRL for informado,
 usar `amount_override`. Ex.: Pluggy gravou -6.26, valor real -77.00 → `"amount_override": -77.00`.
 
-Quando a Pluggy traz a cobrança sem o IOF, liste o lojista em `Config[iof]`:
-`{"rate": 0.035, "match": ["TEXTO DO LOJISTA"]}`. O `sync` grava nos lançamentos novos de
+Quando a Pluggy traz a cobrança sem o IOF, liste o lojista em `Config[iof]`
+(`finance.admin config set iof '{"rate": 0.035, "match": ["TEXTO DO LOJISTA"]}'`). O `sync` grava nos lançamentos novos de
 cartão que casam `amount_override = valor × (1 + rate)` com a nota "IOF estimado". Ele pula
 override manual, split e dia que já tem linha de IOF na conta, e avisa se a linha chegar
 depois. Para lançamentos que já estão no Ledger: `uv run python -m finance.iof [--dry-run]`.

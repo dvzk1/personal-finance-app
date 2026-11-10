@@ -19,7 +19,6 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import sheets
 from . import config
 from .config import DEFAULT_TIMEZONE
 
@@ -293,3 +292,9 @@ def check() -> dict:
         "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")]
     path = db_path()
     return {"title": path.name, "url": path.as_uri(), "tabs": tabs}
+
+
+# No fim de propósito: `sheets` importa este módulo no fim dele para trocar as funções.
+# Com o import aqui embaixo, as funções já existem quando a troca acontece, seja qual for
+# o módulo importado primeiro (`python -m finance.backup` começa por este).
+from . import sheets  # noqa: E402

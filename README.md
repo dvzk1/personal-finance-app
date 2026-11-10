@@ -277,9 +277,12 @@ feito uma vez não volta. Três coisas que valem saber:
 - Regra criada pelo dashboard já nasce aplicada ao passado.
 - Regra não adivinha. Se o texto não casar como você escreveu, o lançamento volta para a
   revisão, e isso é intencional: melhor pedir confirmação do que categorizar errado.
-- Para **ver, mudar ou apagar** uma regra não há tela. Abra a aba `Rules` na planilha ou
-  peça na conversa ("me mostra as regras que apontam para Alimentação", "essa regra está
-  pegando coisa demais, restringe para o lojista").
+- Para **ver, mudar ou apagar** uma regra não há tela: use `uv run python -m finance.admin
+  rules list|show|set|move|remove` ou peça na conversa ("me mostra as regras que apontam para
+  Alimentação", "essa regra está pegando coisa demais, restringe para o lojista"). O mesmo
+  comando cuida da taxonomia (`taxonomy add|set|rename|remove`), do mapa da Pluggy
+  (`pluggy-map`) e das chaves de `Config` sem tela (`config set iof|timezone|...`). Na
+  planilha, também dá para editar as abas direto.
 
 ### O que só acontece na conversa
 
