@@ -199,13 +199,15 @@ def plan_changes(data: dict, assets: dict, accounts: dict, tree: dict,
             problems.append(f"Movimentação de {trade['ticker']} aponta para o lançamento "
                             f"{trade['ledger_id']}, que não existe no Ledger.")
             continue
-        if _fingerprint(trade) in recorded:
+        if _fingerprint(trade) in recorded and not row.get("repeat"):
             # O id é gerado a cada apply e não reconhece o que já foi gravado, então a
             # comparação é pelo conteúdo. Rodar o mesmo arquivo de novo (por exemplo,
             # depois de um erro no meio) não duplica nada. Só se compara com o que já
-            # está na aba: duas compras idênticas no mesmo arquivo entram as duas.
+            # está na aba: duas compras idênticas no mesmo arquivo entram as duas, e uma
+            # repetição de verdade num apply seguinte leva "repeat": true.
             problems.append(f"{trade['side']} de {trade['ticker']} em {trade['date']} "
-                            "já está gravada: ignorada.")
+                            "já está gravada: ignorada (se é outra igual, use "
+                            '"repeat": true).')
             continue
         if trade["ticker"] not in assets:
             assets[trade["ticker"]] = _asset_from_trade(trade, tree, problems)

@@ -112,7 +112,9 @@ Arquivo **efêmero e local** (gitignored), espelho do `.decisions.json` da categ
 }
 ```
 
-Depois: `uv run python -m finance.invest apply`. Ticker que ainda não existe é cadastrado
+Depois: `uv run python -m finance.invest apply`. Movimentação igual a uma já gravada (mesma
+data, ticker, tipo, quantidade, preço, conta) é ignorada, para rodar o mesmo arquivo de novo
+não duplicar; uma segunda compra idêntica de verdade leva `"repeat": true`. Ticker que ainda não existe é cadastrado
 sozinho, com o símbolo deduzido do formato e a linha de cotação criada; a **classe** dele
 fica pendente, porque isso é decisão de política.
 
@@ -383,8 +385,9 @@ uv run python -m finance.admin config set iof '{"rate": 0.035, "match": ["LOJA"]
 
 `rename` leva o nome novo a lançamentos (e partes de divisão), regras, mapa da Pluggy, cores,
 orçamento e subcategorias de destino da carteira. `remove` recusa o que está em uso e diz
-onde: reclassifique antes. Depois de mexer em regras, rode `finance.categorize` e
-`finance.report`; depois de renomear, só `finance.report`.
+onde: reclassifique antes. Depois de mexer em regras, rode
+`uv run python -m finance.categorize reapply` (reaplica as regras em todo lançamento não
+manual e regera os relatórios); depois de renomear, só `finance.report`.
 
 ---
 

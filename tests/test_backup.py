@@ -95,3 +95,28 @@ def test_export_and_import_move_the_data_between_machines(local_db, tmp_path):
     _ledger(["outra coisa"])
     backup.restore(exported, reason="antes-de-importar")
     assert sorted(L.load_ledger()) == ["daqui"]
+
+
+def test_restoring_the_oldest_copy_with_rotation_full_keeps_the_data(local_db, monkeypatch):
+    """A cópia de segurança feita antes de restaurar disparava a rotação, que apagava a
+    cópia escolhida antes de ela ser lida, e o banco virava um arquivo vazio."""
+    monkeypatch.setattr(backup, "KEEP_OTHER", 2)
+    _ledger(["antigo"])
+    oldest = backup.create("um", now=datetime(2026, 1, 1))
+    _ledger(["meio"])
+    backup.create("dois", now=datetime(2026, 1, 2))
+    _ledger(["atual"])
+
+    backup.restore(oldest)
+
+    assert sorted(L.load_ledger()) == ["antigo"]
+    assert len([b for b in backup.list_backups() if b["reason"] != backup.DAILY]) == 2
+
+
+def test_copy_name_with_collision_suffix_keeps_its_reason(local_db):
+    _ledger(["a"])
+    moment = datetime(2026, 1, 1, 12)
+    backup.create(backup.DAILY, now=moment)
+    second = backup.create(backup.DAILY, now=moment)
+    assert second.name.endswith("-diaria-2.db")
+    assert {b["reason"] for b in backup.list_backups()} == {backup.DAILY}

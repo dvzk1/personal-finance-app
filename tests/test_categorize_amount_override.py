@@ -45,3 +45,20 @@ def test_amount_override_alone_keeps_the_split():
     assert saved["amount_override"] == total
     assert saved["splits"] == rec["splits"]
     assert saved["category_source"] == "split"
+
+
+def test_reapply_brings_an_edited_rule_to_old_transactions_and_keeps_pending_decisions():
+    from finance import rules as R
+
+    index, hit = next((i, r) for i, rule in enumerate(STORE["Rules"])
+                      for r in STORE["Ledger"] if r["category_source"] != "manual"
+                      and not r.get("splits") and R.first_match(r, STORE["Rules"]) == rule)
+    STORE["Rules"][index] = {**STORE["Rules"][index], "category": "Lazer",
+                             "subcategory": "Viagem"}
+    categorize.DECISIONS_FILE.write_text('{"assignments": []}')
+
+    categorize.apply(learn=False, decisions={})
+
+    saved = {r["id"]: r for r in STORE["Ledger"]}[hit["id"]]
+    assert (saved["category"], saved["subcategory"]) == ("Lazer", "Viagem")
+    assert categorize.DECISIONS_FILE.exists(), "reapply não apaga decisões pendentes"

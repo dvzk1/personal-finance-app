@@ -154,8 +154,10 @@ async function applyEdit(p) {
   const learn = p.mode === 'rule'
   const decisions = { assignments: [], rules: [] }
   const propagate = learn && !!p.rule?.propagate_note && !!p.rule?.note
-  const noteVal = propagate ? String(p.rule.note)
-    : p.note == null ? '' : String(p.note)
+  // nota intocada chega como null e fica fora do assignment: com `note` presente, o
+  // categorize apply grava o valor, e o vazio apagaria a nota de cada lançamento
+  const noteField = propagate ? { note: String(p.rule.note) }
+    : p.note == null ? {} : { note: String(p.note) }
   if (p.mode === 'tags') {
     decisions.assignments.push({
       ids: p.ids,
@@ -165,7 +167,7 @@ async function applyEdit(p) {
   } else if (p.mode === 'split' && Array.isArray(p.splits) && p.splits.length) {
     decisions.assignments.push({
       ids: p.ids,
-      note: noteVal,
+      ...noteField,
       splits: p.splits.map((s) => ({
         amount: Number(s.amount),
         category: s.category,
@@ -178,7 +180,7 @@ async function applyEdit(p) {
     decisions.assignments.push({
       ids: p.ids, category: p.category,
       subcategory: p.subcategory || null, source: 'manual',
-      note: noteVal,
+      ...noteField,
       ...(p.settle_with !== undefined ? { settle_with: p.settle_with || null } : {}),
     })
   }

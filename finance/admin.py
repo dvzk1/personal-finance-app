@@ -48,8 +48,7 @@ class AdminError(ValueError):
     """Pedido que não dá para cumprir, com o motivo para quem pediu."""
 
 
-REAPPLY_HINT = ("Para os lançamentos refletirem: uv run python -m finance.categorize "
-                "&& uv run python -m finance.report")
+REAPPLY_HINT = ("Para os lançamentos refletirem: uv run python -m finance.categorize reapply")
 
 
 # --------------------------------------------------------------------------- taxonomia
@@ -245,11 +244,16 @@ def rename_taxonomy(category: str, new: str, sub: str | None = None) -> str:
             B.save(plan)
             extra.append(f"{moved} teto(s) no orçamento")
     else:
+        # a lista de destino vale para toda categoria de poupança: se outra ainda usa o
+        # nome antigo, ele continua na lista e o novo entra ao lado
         destinations = list(LL.load_destination_subcategories())
-        treatment = T.treatment_of(T.load_treatments(), category)
-        if sub in destinations and treatment == "poupança":
-            sheets.write_config(LL.DESTINATION_KEY,
-                                [new if d == sub else d for d in destinations])
+        tax, treatments = T.load_all()
+        if sub in destinations and T.treatment_of(treatments, category) == "poupança":
+            still_used = any(sub in subs for cat, subs in tax.items()
+                             if cat != category and T.treatment_of(treatments, cat) == "poupança")
+            updated = ([d for d in destinations] + [new] if still_used
+                       else [new if d == sub else d for d in destinations])
+            sheets.write_config(LL.DESTINATION_KEY, list(dict.fromkeys(updated)))
             extra.append("subcategorias de destino da carteira")
 
     old = f"{category}/{sub}" if sub else category

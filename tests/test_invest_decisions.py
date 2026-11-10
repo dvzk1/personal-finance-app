@@ -170,3 +170,11 @@ def test_applying_the_same_file_twice_records_nothing_new():
 
     assert again["trades"] == []
     assert sum("já está gravada" in problem for problem in again["problems"]) == 2
+
+
+def test_a_real_repeat_is_recorded_when_marked():
+    trade = {"date": "2026-09-07", "ticker": "BBAS3", "side": "BUY", "quantity": 10,
+             "price": 25.0, "account": "xp"}
+    first = _apply({"trades": [trade]})
+    again = _apply({"trades": [{**trade, "repeat": True}]}, trades=first["trades"])
+    assert len(again["trades"]) == 1

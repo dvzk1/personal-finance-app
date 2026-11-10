@@ -580,7 +580,11 @@ INTERFACE = ("read_records", "write_records", "append_rows", "delete_row",
              "read_config", "write_config", "ensure_tabs", "ensure_current_schema",
              "check", "reset_cache")
 # A implementação do Google continua acessível no modo local: os testes dela e o
-# importador da planilha usam estas, não as do módulo.
+# importador da planilha usam estas, não as do módulo. Cuidado: elas chamam umas às outras
+# pelo nome do módulo, então no modo local `GOOGLE["update_changed_rows"]`,
+# `["ensure_tabs"]` e `["ensure_current_schema"]` cairiam no SQLite. Só as de leitura
+# (`read_records`, `read_config`, `config_keys`) são seguras isoladas; os testes trocam
+# todas juntas (fixture `google_backend`).
 GOOGLE = {_name: globals()[_name] for _name in INTERFACE}
 LOCAL = BACKEND == "sqlite"
 if LOCAL:

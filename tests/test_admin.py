@@ -52,7 +52,11 @@ def test_rename_subcategory_reaches_rules_and_destinations(demo):
     assert rules.count(("Impostos/Taxas", "Tributos")) == 2
     assert ("Impostos/Taxas", "Impostos") not in rules
 
+    # Reserva também é poupança e usa "Aporte": o nome antigo fica e o novo entra ao lado
     admin.rename_taxonomy("Investimentos", "Aplicação", sub="Aporte")
+    assert LL.load_destination_subcategories() == ("Aporte", "Resgate", "Aplicação")
+    # quando ninguém mais usa o nome antigo, ele sai da lista
+    admin.rename_taxonomy("Reserva", "Aplicação", sub="Aporte")
     assert LL.load_destination_subcategories() == ("Aplicação", "Resgate")
 
 

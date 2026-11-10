@@ -184,14 +184,17 @@ def _import_statement(ledger: dict, rows: list[dict]) -> tuple[int, list[dict]]:
     return added, trades
 
 
-def apply(learn: bool, do_report: bool = False) -> None:
-    if not DECISIONS_FILE.exists():
+def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -> None:
+    """Aplica o arquivo de decisões. Com `decisions`, usa esse dict e não toca no arquivo:
+    `reapply` passa {} para só reaplicar as regras em todo lançamento não manual."""
+    from_file = decisions is None
+    if from_file and not DECISIONS_FILE.exists():
         sys.exit(f"Não encontrei {DECISIONS_FILE}. O agente deve gravá-lo antes.")
     sheets.ensure_current_schema()
     tax, treats = T.load_all()   # 1 leitura da Taxonomy p/ taxonomia + tratamentos
     rules_data = R.load_rules()
     ledger = L.load_ledger()
-    dec = json.loads(DECISIONS_FILE.read_text())
+    dec = json.loads(DECISIONS_FILE.read_text()) if from_file else decisions
     # foto do estado antes das mudanças p/ gravar só as linhas que de fato mudarem
     before = {tid: L.snapshot(rec) for tid, rec in ledger.items()}
 
@@ -311,8 +314,9 @@ def apply(learn: bool, do_report: bool = False) -> None:
         for problem in problems:
             print(f"  ⚠ abatimento não gravado: {problem}")
         print(f"Abatimentos: +{created} criados, -{removed} removidos.")
-    TO_CATEGORIZE_FILE.unlink(missing_ok=True)
-    DECISIONS_FILE.unlink(missing_ok=True)
+    if from_file:
+        TO_CATEGORIZE_FILE.unlink(missing_ok=True)
+        DECISIONS_FILE.unlink(missing_ok=True)
 
     if imported:
         print(f"Extrato: +{imported} lançamento(s) novo(s).")
@@ -358,7 +362,9 @@ def stats() -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Categorização (regras + IA).")
     ap.add_argument("command", nargs="?", default="prepare",
-                    choices=["prepare", "apply", "stats"])
+                    choices=["prepare", "apply", "reapply", "stats"],
+                    help="reapply: reaplica as regras em todo lançamento não manual "
+                         "(depois de editar regras) e regera os relatórios")
     ap.add_argument("--learn", action="store_true",
                     help="(apply) persiste as regras novas em rules.json")
     ap.add_argument("--report", action="store_true",
@@ -368,6 +374,8 @@ def main() -> None:
         prepare()
     elif args.command == "apply":
         apply(args.learn, args.report)
+    elif args.command == "reapply":
+        apply(learn=False, do_report=True, decisions={})
     else:
         stats()
 

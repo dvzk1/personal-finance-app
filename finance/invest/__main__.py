@@ -185,7 +185,7 @@ def cmd_quotes(args) -> int:
     result = QS.refresh(force=args.force)
     print(f"Cotações atualizadas: {len(result['updated'])}")
     QS.report(result)
-    for ticker in sorted(set(Q.load()) - set(result["updated"]) - set(result["failed"])):
+    for ticker in result["fresh"]:
         print(f"  {ticker}: ainda recente, não buscado (use --force)")
     return 1 if result["failed"] else 0
 

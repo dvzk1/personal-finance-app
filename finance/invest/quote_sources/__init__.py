@@ -13,6 +13,7 @@ relatórios e o banco só veem o preço em reais gravado na aba Quotes, no mesmo
 fórmula deixava (valor em reais e data como número serial).
 """
 
+import http.client
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -38,7 +39,8 @@ FRESH_FOR = timedelta(minutes=15)
 # Os provedores gratuitos aceitam um ativo por chamada (~0,8 s cada). Buscar em paralelo
 # corta o tempo; o limite pequeno evita bloqueio por excesso de requisições.
 MAX_PARALLEL = 4
-_FAILURES = (OSError, KeyError, IndexError, TypeError, ValueError)
+# HTTPException (IncompleteRead, conexão cortada no meio da resposta) não é OSError.
+_FAILURES = (OSError, http.client.HTTPException, KeyError, IndexError, TypeError, ValueError)
 
 
 def _override(text: str) -> dict:
@@ -89,12 +91,14 @@ def _fx_entry(currency: str) -> dict:
     return {"ticker": ticker, "kind": "fx", "quote_symbol": Q.symbol_for(ticker, "fx")}
 
 
-def fetch_all(entries: list[dict], known_rates: dict | None = None) -> tuple[dict, dict]:
+def fetch_all(entries: list[dict], known_rates: dict | None = None,
+              fresh_rates: dict | None = None) -> tuple[dict, dict]:
     """Preço em reais de cada entrada: ({ticker: (preço, provedor)}, {ticker: motivo}).
 
     Busca tudo em paralelo na moeda do ativo e depois converte. O câmbio vem, nesta
-    ordem, de uma linha de câmbio buscada agora, de uma busca extra pelo par, ou do
-    último valor gravado (`known_rates`, {"USDBRL": 5.6})."""
+    ordem, de uma linha de câmbio buscada agora, de um câmbio gravado que ainda está
+    recente (`fresh_rates`), de uma busca extra pelo par, ou do último valor gravado
+    (`known_rates`). Os dois dicionários usam o par como chave: {"USDBRL": 5.6}."""
     known_rates = known_rates or {}
     with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
         outcomes = list(pool.map(_attempt, entries))
@@ -107,6 +111,9 @@ def fetch_all(entries: list[dict], known_rates: dict | None = None) -> tuple[dic
             native[entry["ticker"]] = outcome
 
     rates = {"BRL": 1.0}
+    for pair, rate in (fresh_rates or {}).items():
+        if len(pair) == 6 and pair.endswith("BRL") and rate:
+            rates[pair[:3]] = rate
     for entry in entries:
         ticker = entry["ticker"]
         if entry.get("kind") == "fx" and ticker in native and native[ticker][1] == "BRL" \
@@ -145,34 +152,39 @@ def _serial(moment: datetime) -> float:
 def refresh(force: bool = False) -> dict:
     """Atualiza as cotações vencidas (todas, com `force`). Ticker que falhou em todos os
     provedores mantém o preço anterior, que vira defasado com o tempo (`quotes.normalize`).
-    Devolve {"updated": [tickers], "failed": {ticker: motivo}}."""
+    Devolve {"updated": [tickers], "failed": {ticker: motivo}, "fresh": [tickers ainda
+    recentes, não buscados]}."""
     now = datetime.now()
     rows = sheets.read_records(Q.TAB)
     # número da linha pela posição do ticker, como a planilha numera (linha 2 = primeira)
     positions = {str(ticker or "").strip().upper(): index + 2 for index, ticker in
                  enumerate(sheets.read_columns(Q.TAB, ["ticker"])["ticker"])}
-    due = []
+    due, fresh_tickers, fresh_rates = [], [], {}
     for row in rows:
         kind = row.get("kind") or "manual"
         if kind == "manual" or not row.get("quote_symbol"):
             continue
         fetched_at = Q._serial_to_datetime(row.get("updated_at"))
         fresh = row.get("price") is not None and fetched_at and now - fetched_at < FRESH_FOR
+        ticker = row["ticker"].strip().upper()
         if force or not fresh:
-            due.append({"ticker": row["ticker"].strip().upper(), "kind": kind,
-                        "quote_symbol": row["quote_symbol"]})
+            due.append({"ticker": ticker, "kind": kind, "quote_symbol": row["quote_symbol"]})
+            continue
+        fresh_tickers.append(ticker)
+        if kind == "fx":
+            fresh_rates[ticker] = row["price"]
     if not due:
-        return {"updated": [], "failed": {}}
+        return {"updated": [], "failed": {}, "fresh": sorted(fresh_tickers)}
 
     known = {ticker: quote["price"] for ticker, quote in Q.load(rows).items()
              if quote["kind"] == "fx" and quote["price"]}
-    priced, failed = fetch_all(due, known)
+    priced, failed = fetch_all(due, known, fresh_rates)
     changes = [(positions[ticker], {"price": price, "currency": "BRL",
                                     "updated_at": _serial(now)})
                for ticker, (price, _) in priced.items() if ticker in positions]
     if changes:
         sheets.update_fields(Q.TAB, changes)
-    return {"updated": sorted(priced), "failed": failed}
+    return {"updated": sorted(priced), "failed": failed, "fresh": sorted(fresh_tickers)}
 
 
 def report(result: dict, out=sys.stdout) -> None:

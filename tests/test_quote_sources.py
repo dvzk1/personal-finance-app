@@ -157,23 +157,24 @@ def test_refresh_fills_prices_skips_fresh_ones_and_keeps_the_old_on_failure(
 
     asked = []
 
-    def fetch_all(entries, known=None):
+    def fetch_all(entries, known=None, fresh=None):
         asked.extend(entry["ticker"] for entry in entries)
         return {"BBAS3": (20.0, "yahoo"), "VOO": (500.0, "yahoo")}, {}
 
     monkeypatch.setattr(QS, "fetch_all", fetch_all)
-    assert QS.refresh() == {"updated": ["BBAS3", "VOO"], "failed": {}}
+    assert QS.refresh() == {"updated": ["BBAS3", "VOO"], "failed": {}, "fresh": []}
     loaded = Q.load()
     assert (loaded["BBAS3"]["price"], loaded["VOO"]["price"]) == (20.0, 500.0)
     assert not loaded["VOO"]["stale"]
 
     asked.clear()
-    assert QS.refresh()["updated"] == []
+    assert QS.refresh() == {"updated": [], "failed": {}, "fresh": ["BBAS3", "VOO"]}
     assert asked == [], "cotação recém-buscada não é pedida de novo"
 
     monkeypatch.setattr(QS, "fetch_all",
-                        lambda entries, known=None: ({}, {"VOO": "fora do ar"}))
-    assert QS.refresh(force=True) == {"updated": [], "failed": {"VOO": "fora do ar"}}
+                        lambda entries, known=None, fresh=None: ({}, {"VOO": "fora do ar"}))
+    assert QS.refresh(force=True) == {"updated": [], "failed": {"VOO": "fora do ar"},
+                                      "fresh": []}
     assert Q.load()["VOO"]["price"] == 500.0, "falha não apaga o preço anterior"
 
 
@@ -182,7 +183,30 @@ def test_refresh_writes_to_the_row_of_each_ticker(local_db, monkeypatch):
     sheets.update_fields(Q.TAB, [(2, {"ticker": ""})])   # linha sem ticker antes das outras
     Q.ensure([_entry("ITUB3", "stock_br")])
     monkeypatch.setattr(QS, "fetch_all",
-                        lambda entries, known=None: ({"ITUB3": (30.0, "yahoo")}, {}))
+                        lambda entries, known=None, fresh=None: ({"ITUB3": (30.0, "yahoo")}, {}))
     QS.refresh()
     assert Q.load()["ITUB3"]["price"] == 30.0
     assert Q.load()["WEGE3"]["price"] is None
+
+
+def test_a_connection_cut_mid_response_moves_to_the_next_provider(monkeypatch):
+    import http.client
+
+    def cut(entry):
+        raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setenv("BRAPI_TOKEN", "t")
+    monkeypatch.setattr(QS.PROVIDERS["brapi"], "fetch", cut)
+    _providers(monkeypatch, yahoo={"BBAS3": (20.0, "BRL")})
+    assert QS.fetch_native(_entry("BBAS3", "stock_br")) == (20.0, "BRL", "yahoo")
+
+
+def test_a_fresh_stored_rate_saves_the_extra_request(monkeypatch):
+    _providers(monkeypatch, yahoo={"VOO": (100.0, "USD")}, bcb={})
+    asked = []
+    original = QS.PROVIDERS["bcb"].fetch
+    monkeypatch.setattr(QS.PROVIDERS["bcb"], "fetch",
+                        lambda entry: asked.append(entry["ticker"]) or original(entry))
+    priced, _ = QS.fetch_all([_entry("VOO", "stock_us")], fresh_rates={"USDBRL": 5.0})
+    assert priced["VOO"][0] == 500.0
+    assert asked == []

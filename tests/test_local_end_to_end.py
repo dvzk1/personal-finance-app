@@ -21,7 +21,7 @@ def test_demo_runs_end_to_end_on_sqlite(local_db, tmp_path, monkeypatch):
     monkeypatch.setattr(categorize, "DECISIONS_FILE", tmp_path / ".decisions.json")
     monkeypatch.setattr(categorize, "TO_CATEGORIZE_FILE", tmp_path / ".to_categorize.json")
     # cotações: os provedores reais são de rede; aqui todo ativo vale R$ 10
-    monkeypatch.setattr(QS, "fetch_all", lambda entries, known=None: (
+    monkeypatch.setattr(QS, "fetch_all", lambda entries, known=None, fresh=None: (
         {entry["ticker"]: (10.0, "fake") for entry in entries}, {}))
 
     monkeypatch.setattr(sys, "argv", ["finance.seed"])

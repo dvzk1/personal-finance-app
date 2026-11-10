@@ -32,7 +32,7 @@ from . import config
 KEEP_DAILY = 30
 KEEP_OTHER = 20
 DAILY = "diaria"
-_NAME = re.compile(r"^(?P<stem>.+)-(?P<stamp>\d{8}-\d{6})-(?P<reason>[a-z0-9-]+)(?:-\d+)?\.db$")
+_NAME = re.compile(r"^(?P<stem>.+)-(?P<stamp>\d{8}-\d{6})-(?P<reason>[a-z0-9-]+?)(?:-\d+)?\.db$")
 
 
 def _current() -> Path:
@@ -76,8 +76,9 @@ def _is_database(path: Path) -> bool:
 
 
 def create(reason: str = "manual", db: Path | None = None,
-           now: datetime | None = None) -> Path | None:
-    """Copia o banco para `backups/`. Banco que ainda não existe não tem o que copiar."""
+           now: datetime | None = None, keep_all: bool = False) -> Path | None:
+    """Copia o banco para `backups/`. Banco que ainda não existe não tem o que copiar.
+    `keep_all` adia a rotação, para quem ainda vai ler uma das cópias antigas."""
     db = Path(db or _current())
     if not db.exists():
         return None
@@ -90,7 +91,8 @@ def create(reason: str = "manual", db: Path | None = None,
         n += 1
         target = folder / f"{base}-{n}.db"
     _copy(db, target)
-    rotate(db)
+    if not keep_all:
+        rotate(db)
     return target
 
 
@@ -154,10 +156,13 @@ def restore(source: Path, db: Path | None = None, reason: str = "antes-de-restau
         raise ValueError(f"{source} não é um banco do Finance Control.")
     if source.resolve() == db.resolve():
         raise ValueError("A cópia escolhida é o próprio banco.")
-    before = create(reason, db)
+    # a rotação só depois da cópia: com o limite cheio, ela apagaria justamente a cópia
+    # mais antiga, que pode ser a escolhida, e o banco seria trocado por um arquivo vazio
+    before = create(reason, db, keep_all=True)
     sqlite_store.reset_cache()
     db.parent.mkdir(parents=True, exist_ok=True)
     _copy(source, db)
+    rotate(db)
     return before
 
 
