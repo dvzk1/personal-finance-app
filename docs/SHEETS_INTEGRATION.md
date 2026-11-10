@@ -8,6 +8,10 @@ Este documento é o guia técnico da integração: o esquema do banco, a camada 
 (`finance/sheets.py`), auth, quotas e troubleshooting. Para o passo a passo de setup, veja o
 [README](../README.md).
 
+> O app também roda sem planilha, num arquivo SQLite local (o padrão quando não há
+> `SHEET_ID`), com a mesma interface e o mesmo esquema de abas (`finance/sqlite_store.py`).
+> Este documento cobre o modo planilha; o esquema da seção de abas vale para os dois.
+
 ---
 
 ## 1. Por que Google Sheets (e não um arquivo/DB tradicional)

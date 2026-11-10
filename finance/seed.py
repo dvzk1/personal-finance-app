@@ -23,7 +23,7 @@ import yaml
 
 from . import sheets
 from . import taxonomy as T
-from .config import DEFAULT_TIMEZONE, SEED_DIR
+from .config import DEFAULT_TIMEZONE, SEED_DIR, db_path
 from .invest import accounts as ACC
 from .invest import assets as A
 from .invest import policy as P
@@ -153,15 +153,20 @@ def main() -> None:
         sys.exit(f"Fixtures não encontrados em {src} (esperado ledger.jsonl, rules.json, "
                  "taxonomy.yaml, budgets.json).")
 
-    print("Conferindo a planilha (SHEET_ID) e criando as abas que faltam...")
+    if sheets.LOCAL:
+        print(f"Abrindo o banco local ({db_path()}) e criando as tabelas que faltam...")
+    else:
+        print("Conferindo a planilha (SHEET_ID) e criando as abas que faltam...")
     sheets.ensure_tabs()
 
     if not args.force:
         busy = _non_empty_tabs()
         if busy:
+            where = ("no banco local não há histórico: copie o arquivo antes se quiser "
+                     "guardar a versão atual" if sheets.LOCAL else
+                     "a versão anterior fica no histórico do Google Sheets")
             sys.exit(f"Estas abas já têm dados: {', '.join(busy)}.\n"
-                     "Use --force para sobrescrever (a versão anterior fica no histórico do "
-                     "Google Sheets).")
+                     f"Use --force para sobrescrever ({where}).")
 
     fx = _read_fixtures(src)
     print(f"Populando a partir de {src}...")

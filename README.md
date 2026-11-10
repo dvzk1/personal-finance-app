@@ -1,8 +1,8 @@
 # Finance Control
 
 Assistente de controle financeiro pessoal operado **via [Claude Code](https://claude.com/claude-code)**,
-com dados do **Open Finance** (via [Pluggy](https://pluggy.ai)) e um **banco de dados no Google
-Sheets**. Um pipeline Python enxuto busca as transações, aplica regras determinísticas de
+com dados do **Open Finance** (via [Pluggy](https://pluggy.ai)) e um **banco de dados local
+(SQLite)** ou, se preferir, **no Google Sheets**. Um pipeline Python enxuto busca as transações, aplica regras determinísticas de
 categorização e gera relatórios; o Claude Code categoriza o que sobra na conversa e aprende
 novas regras. Um dashboard React (leitura + edição leve) visualiza tudo.
 
@@ -11,15 +11,15 @@ novas regras. Um dashboard React (leitura + edição leve) visualiza tudo.
 > o trabalho mecânico (buscar, aplicar regras, agregar). Veja [`CLAUDE.md`](CLAUDE.md) para o
 > contrato de operação.
 
-> 🔒 **Seus dados moram na SUA planilha do Google Sheets** — privados, na sua conta, fora do
-> git. Por isso o repositório é público e colaborável sem expor as finanças de ninguém. Os
+> 🔒 **Seus dados moram no SEU computador** (arquivo SQLite na pasta de dados do sistema) ou
+> **na SUA planilha do Google Sheets** — privados, fora do git. Por isso o repositório é público e colaborável sem expor as finanças de ninguém. Os
 > dados de exemplo em `data/seed/` são **sintéticos/fictícios**, só para o onboarding.
 
 ## Funcionalidades
 
-- **Banco de dados no Google Sheets**: ledger, regras, taxonomia (com metadados visuais
-  de categorias e subcategorias), mapa da Pluggy e orçamento vivem numa
-  planilha sua; nada de dados financeiros no git.
+- **Banco de dados local ou no Google Sheets**: ledger, regras, taxonomia (com metadados
+  visuais de categorias e subcategorias), mapa da Pluggy e orçamento vivem num arquivo
+  SQLite no seu computador ou numa planilha sua; nada de dados financeiros no git.
 - **Sync incremental** das transações da Pluggy (`finance.sync`).
 - **Categorização** por regras determinísticas + loop assistido pelo Claude, com
   **aprendizado de regras** retroativo (`finance.categorize`).
@@ -33,23 +33,56 @@ novas regras. Um dashboard React (leitura + edição leve) visualiza tudo.
   splits e drill-down global.
 - **Modo de privacidade** no dashboard: oculta valores agregados sem esconder percentuais,
   gráficos ou lançamentos individuais. A preferência fica somente no navegador.
-- **Seed de demonstração** — um comando popula sua planilha com um banco mocado funcional.
-- **Espaço Investimentos**: carteira derivada das suas movimentações, com cotação vinda do
-  `GOOGLEFINANCE` da própria planilha, política de alocação em árvore, simulador de aporte
+- **Seed de demonstração** — um comando popula o banco com dados fictícios funcionais.
+- **Espaço Investimentos**: carteira derivada das suas movimentações, com cotação de
+  APIs gratuitas (banco local) ou do `GOOGLEFINANCE` (planilha), política de alocação em árvore, simulador de aporte
   e caixinhas. Detalhes em [Investimentos](#investimentos).
 
 ## Stack
 
 - **Backend:** Python 3.13 + [uv](https://docs.astral.sh/uv/), `pluggy-sdk`, `gspread` +
   `google-auth` (Google Sheets), `pyyaml`, `python-dotenv`.
-- **Dados:** Google Sheets (fonte da verdade). Relatórios gerados localmente em `data/reports/`.
+- **Dados:** SQLite local ou Google Sheets (fonte da verdade, um dos dois). Relatórios
+  gerados localmente em `data/reports/`.
 - **Frontend:** Vite + React 18 + Tailwind v4 + Recharts + TanStack Table.
 
 ## Setup / Onboarding
 
-### 1. Google Sheets (banco de dados)
+### 1. Banco de dados
 
-O app guarda seus dados numa planilha sua, acessada por uma **Service Account** — uma "conta de
+Escolha onde os dados ficam. Só um dos dois é a fonte em cada instalação: não há
+sincronização entre eles.
+
+#### Opção A: local (padrão, sem conta Google)
+
+Não precisa configurar nada. Sem `SHEET_ID` no `.env`, o app cria sozinho um arquivo SQLite na
+pasta de dados do seu sistema, fora do repositório (apagar o clone não leva os dados junto):
+
+| Sistema | Arquivo |
+|---|---|
+| macOS | `~/Library/Application Support/finance-control/finance.db` |
+| Linux | `~/.local/share/finance-control/finance.db` |
+| Windows | `%APPDATA%\finance-control\finance.db` |
+
+`FINANCE_DB=/outro/caminho.db` no `.env` usa outro arquivo.
+
+```bash
+uv run python -m finance.seed        # cria as tabelas e enche com dados fictícios
+uv run python main.py                # confere o banco e mostra as tabelas
+```
+
+As cotações da carteira vêm de APIs gratuitas, sem chave: Yahoo Finance para B3, EUA e
+cripto, e Banco Central (PTAX) para o dólar. Com um token grátis da
+[brapi.dev](https://brapi.dev) em `BRAPI_TOKEN`, a B3 passa a vir dela, com o Yahoo de
+reserva. A ordem por tipo de ativo é configurável em `QUOTE_PROVIDERS` (ver `.env.example`).
+O `finance.invest report` busca o que estiver vencido; `finance.invest quotes --force`
+busca tudo na hora.
+
+Backup: o banco é um arquivo só. Copie-o.
+
+#### Opção B: Google Sheets
+
+Para editar os dados direto na planilha ou usar de mais de uma máquina. O app guarda seus dados numa planilha sua, acessada por uma **Service Account** — uma "conta de
 robô" do Google Cloud (um e-mail + uma chave JSON) que o programa usa para ler/gravar a planilha
 **sem abrir navegador nem pedir seu login**. Você faz esta configuração **uma vez só**. As
 instruções abaixo seguem os nomes do console em português.
@@ -84,7 +117,8 @@ esquece** — sem ele o app dá "permission denied".
 **1.7. Pegue o SHEET_ID.** Está na URL da planilha, entre `/d/` e `/edit`:
 `https://docs.google.com/spreadsheets/d/`**`<SHEET_ID>`**`/edit`.
 
-**1.8. Configure o `.env` e popule a demo:**
+**1.8. Configure o `.env` e popule a demo** (com `SHEET_ID` preenchido, o app usa a
+planilha):
 
 ```bash
 cp .env.example .env
@@ -115,7 +149,7 @@ cd frontend && npm install
 
 ## Operação (fluxo recorrente)
 
-Para abrir o app no dia a dia, um comando só (atualiza os relatórios a partir do Sheets e sobe
+Para abrir o app no dia a dia, um comando só (atualiza os relatórios a partir do banco e sobe
 o dashboard):
 
 ```bash
@@ -126,9 +160,9 @@ o dashboard):
 Ou os passos individuais, em linguagem natural com o Claude Code ou direto pelo CLI:
 
 ```bash
-uv run python -m finance.sync --days 30     # puxa transações novas da Pluggy → Sheets
+uv run python -m finance.sync --days 30     # puxa transações novas da Pluggy → banco
 uv run python -m finance.categorize         # categoriza (+ apply --learn)
-uv run python -m finance.report             # gera relatórios locais a partir do Sheets
+uv run python -m finance.report             # gera relatórios locais a partir do banco
 uv run python -m finance.migrate            # acrescenta campos novos sem apagar dados
 uv run python -m finance.migrate --dry-run  # confere migrações de data sem gravar
 ```
@@ -296,7 +330,7 @@ Só esses quatro valores são fixos. Quantos nós existem em cada papel, e como 
 
 | valuation | de onde vem | para quê |
 |---|---|---|
-| `quote` | fórmula `GOOGLEFINANCE` na aba `Quotes` | ações, FIIs, ETFs, cripto, câmbio |
+| `quote` | aba `Quotes`: APIs gratuitas (banco local) ou fórmula `GOOGLEFINANCE` (planilha) | ações, FIIs, ETFs, cripto, câmbio |
 | `balance` | saldo que você informa, com data | conta no exterior, caixinha, papel sem cotação |
 | `pluggy` | saldo sincronizado da instituição | Tesouro, CDB, fundos e **saldo de conta corrente** |
 
@@ -345,9 +379,11 @@ uv run python -m finance.invest apply
 
 ```
 finance/        # pipeline Python (sync, rules, categorize, report, sheets, seed, ...)
-  sheets.py     # camada de acesso ao Google Sheets (banco de dados)
-  seed.py       # inicializa a planilha com o banco de demonstração
+  sheets.py     # interface do banco + implementação Google Sheets
+  sqlite_store.py # implementação SQLite local da mesma interface
+  seed.py       # inicializa o banco com os dados de demonstração
   invest/       # carteira: política, ativos, movimentações, cotações, aporte, Pluggy
+    quote_sources/ # provedores de cotação do banco local (Yahoo, brapi, Banco Central)
 frontend/       # dashboard React (Vite)
 data/
   seed/         # fixtures SINTÉTICOS do banco mocado (versionados) — fonte do seed
@@ -361,8 +397,10 @@ CLAUDE.md       # contrato de operação (lido pelo Claude Code a cada sessão)
 
 - `credentials.json` (chave da Service Account) e `.env` (SHEET_ID + credenciais Pluggy)
   **nunca devem ser commitados** — estão no `.gitignore`.
-- Seus dados financeiros vivem na **sua** planilha do Google Sheets, não no repositório.
-- Backup: o Google Sheets mantém *Histórico de versões* nativo (*Arquivo → Histórico de versões*).
+- Seus dados financeiros vivem no **seu** banco (arquivo local ou planilha), não no repositório.
+- Backup: no banco local, copie o arquivo `finance.db`. No Google Sheets, há *Histórico de
+  versões* nativo (*Arquivo → Histórico de versões*).
+- `BRAPI_TOKEN` fica no `.env`, como as outras chaves.
 - A API do dashboard só atende o próprio computador (`localhost`, `127.0.0.1`, `[::1]`) e só
   aceita gravação vinda do próprio dashboard. Outro site aberto no navegador recebe 403. Por
   isso o dashboard não abre por IP da rede (`vite --host`): ele não foi feito para isso.

@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from finance.invest import assets as A
 from finance.invest import quotes as Q
 
@@ -76,6 +78,7 @@ def test_missing_lists_only_quote_priced_assets():
     assert [entry["ticker"] for entry in pending] == ["VOO"]
 
 
+@pytest.mark.usefixtures("google_backend")
 def test_foreign_balance_ensures_the_exchange_rate():
     assets = A.load([
         {"ticker": "INTER-GLOBAL", "node": "livre", "valuation": "balance",
@@ -94,6 +97,7 @@ def test_foreign_balance_ensures_the_exchange_rate():
         '=GOOGLEFINANCE("CURRENCY:EURBRL")'
 
 
+@pytest.mark.usefixtures("google_backend")
 def test_rows_for_carry_the_formula_and_the_timestamp():
     row = Q.rows_for([{"ticker": "WEGE3", "kind": "stock_br"}])[0]
     assert row["price"] == '=GOOGLEFINANCE("BVMF:WEGE3")'

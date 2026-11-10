@@ -1,5 +1,8 @@
 """Cotações (aba **Quotes**), o encapsulamento do GOOGLEFINANCE.
 
+No backend local não há fórmula: os preços vêm dos provedores de `quote_sources/` e são
+gravados nas mesmas colunas, no mesmo formato. Daqui para baixo nada muda.
+
 A aba é a única com fórmula: `price` guarda a chamada e o Sheets devolve o resultado já
 calculado quando a API lê com UNFORMATTED_VALUE. Isso dá cotação de ação, FII, ativo
 americano, cripto e câmbio sem nenhuma chave de API.
@@ -28,6 +31,18 @@ _SHEETS_EPOCH = datetime(1899, 12, 30)
 _CRYPTO_HINTS = ("BTC", "ETH", "SOL", "ADA", "XRP", "DOGE", "BNB", "LTC", "USDT", "USDC")
 
 
+def crypto_code(ticker: str) -> str:
+    """Só a moeda: `BTC`, `BTCUSD`, `BTC-USD` e `BTC/BRL` viram `BTC`. O símbolo acrescenta
+    a cotação em dólar, e manter o par no ticker gerava `CURRENCY:BTCUSDUSD`, que não existe."""
+    code = (ticker or "").strip().upper()
+    for quote in ("USDT", "USD", "BRL"):
+        for separator in ("-", "/", ""):
+            suffix = separator + quote
+            if code.endswith(suffix) and len(code) > len(suffix):
+                return code[:-len(suffix)]
+    return code
+
+
 def guess_kind(ticker: str) -> str:
     """Palpite pelo formato do ticker. É sugestão de tela: quem decide é o catálogo,
     porque BTC e uma ação americana de três letras são indistinguíveis daqui."""
@@ -36,7 +51,7 @@ def guess_kind(ticker: str) -> str:
         return "manual"
     if code in ("USDBRL", "USD/BRL", "USD"):
         return "fx"
-    if code in _CRYPTO_HINTS:
+    if code in _CRYPTO_HINTS or crypto_code(code) in _CRYPTO_HINTS:
         return "crypto"
     # radical da B3 aceita dígito no meio (B3SA3), o que muda é o sufixo
     radical, suffix = code[:4], code[4:]
@@ -56,7 +71,7 @@ def symbol_for(ticker: str, kind: str) -> str | None:
     if kind == "stock_us":
         return code
     if kind == "crypto":
-        return f"CURRENCY:{code}USD"
+        return f"CURRENCY:{crypto_code(code)}USD"
     if kind == "fx":
         pair = code.replace("/", "")
         if len(pair) == 3:
@@ -148,15 +163,18 @@ def missing(quotes: dict, assets: dict) -> list[dict]:
 
 
 def rows_for(entries: list[dict]) -> list[dict]:
-    """Linhas prontas para o append: a fórmula vai no lugar do preço."""
+    """Linhas prontas para o append. Na planilha, a fórmula vai no lugar do preço; no
+    banco local o preço começa vazio e quem preenche são os provedores (`quote_sources`)."""
     rows = []
     for entry in entries:
         kind = entry.get("kind") or guess_kind(entry["ticker"])
         symbol = entry.get("quote_symbol") or symbol_for(entry["ticker"], kind)
+        local = sheets.LOCAL
         rows.append({
             "ticker": entry["ticker"], "quote_symbol": symbol,
-            "price": formula_for(symbol, kind) or "", "currency": "BRL",
-            "kind": kind, "updated_at": "=NOW()",
+            "price": None if local else formula_for(symbol, kind) or "",
+            "currency": "BRL", "kind": kind,
+            "updated_at": None if local else "=NOW()",
         })
     return rows
 

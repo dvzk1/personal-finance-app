@@ -1,4 +1,4 @@
-"""Verificação rápida de conectividade (Google Sheets + Pluggy) e estado do ledger.
+"""Verificação rápida do backend (SQLite local ou Google Sheets), da Pluggy e do ledger.
 
 Uso: uv run python main.py
 Para o fluxo real use as skills / módulos: finance.sync, finance.categorize, finance.report
@@ -10,15 +10,16 @@ from finance import sheets
 
 
 def main() -> None:
-    # ---- Google Sheets (banco de dados) ----
-    print("Conectando ao Google Sheets...")
+    # ---- banco de dados ----
+    where = "banco local (SQLite)" if sheets.LOCAL else "Google Sheets"
+    print(f"Conectando ao {where}...")
     try:
         info = sheets.check()
-        print(f"OK — planilha '{info['title']}'")
+        print(f"OK — {'arquivo' if sheets.LOCAL else 'planilha'} '{info['title']}'")
         print(f"  abas: {', '.join(info['tabs'])}")
         print(f"  {info['url']}\n")
     except sheets.SheetsError as e:
-        print(f"FALHA no Google Sheets:\n  {e}\n")
+        print(f"FALHA no {where}:\n  {e}\n")
         return
 
     # ---- Pluggy (Open Finance) ----

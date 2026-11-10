@@ -17,8 +17,17 @@ concurrency:
 
 jobs:
   backend:
+    # A suíte roda nos dois backends. No modo sqlite, o que não tem dublê grava num
+    # banco temporário (o conftest cria); no modo sheets, bate na rede e o conftest recusa.
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sqlite, sheets]
+    name: backend (${{ matrix.backend }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      FINANCE_BACKEND: ${{ matrix.backend }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.3.3

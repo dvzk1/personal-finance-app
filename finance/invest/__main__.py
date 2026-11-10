@@ -5,6 +5,7 @@
   uv run python -m finance.invest show              # resumo da carteira no terminal
   uv run python -m finance.invest plan 3000         # simula um aporte
   uv run python -m finance.invest sync              # confere com as corretoras (Pluggy)
+  uv run python -m finance.invest quotes [--force]  # busca cotações (só no banco local)
 """
 
 import argparse
@@ -25,6 +26,7 @@ from . import plan as PL
 from . import pluggy_sync as PS
 from . import policy as P
 from . import portfolio as PF
+from . import quote_sources as QS
 from . import quotes as Q
 from . import report as R
 from . import trades as T
@@ -171,6 +173,23 @@ def cmd_sync(args) -> int:
     return 0
 
 
+def cmd_quotes(args) -> int:
+    """Busca as cotações agora. Na planilha quem cota é o GOOGLEFINANCE, então não há o
+    que fazer; no banco local é o mesmo refresh que o `report` roda, sem esperar."""
+    if not sheets.LOCAL:
+        print("Na planilha as cotações vêm do GOOGLEFINANCE: nada a buscar.")
+        return 0
+    pending = Q.missing(Q.load(), A.load())
+    if pending:
+        Q.ensure(pending)
+    result = QS.refresh(force=args.force)
+    print(f"Cotações atualizadas: {len(result['updated'])}")
+    QS.report(result)
+    for ticker in sorted(set(Q.load()) - set(result["updated"]) - set(result["failed"])):
+        print(f"  {ticker}: ainda recente, não buscado (use --force)")
+    return 1 if result["failed"] else 0
+
+
 def cmd_report(args) -> int:
     R.generate(write_snapshot=not args.no_snapshot)
     return 0
@@ -243,6 +262,11 @@ def main() -> int:
     plan_cmd.add_argument("amount", type=float)
     plan_cmd.add_argument("--mode", choices=PL.MODES, default="spread")
     plan_cmd.set_defaults(func=cmd_plan)
+
+    quotes_cmd = sub.add_parser("quotes", help="busca as cotações (banco local)")
+    quotes_cmd.add_argument("--force", action="store_true",
+                            help="busca também as que ainda estão recentes")
+    quotes_cmd.set_defaults(func=cmd_quotes)
 
     args = parser.parse_args()
     if not getattr(args, "func", None):

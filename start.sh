@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Sobe o dashboard do Finance Control atualizando os relatorios a partir do Google Sheets.
+# Sobe o dashboard do Finance Control atualizando os relatorios a partir do banco
+# (SQLite local ou Google Sheets).
 #
 # Uso (da raiz do projeto ou de qualquer lugar):
-#   ./start.sh           atualiza relatorios (le do Sheets) + sobe o dashboard
+#   ./start.sh           atualiza relatorios (le do banco) + sobe o dashboard
 #   ./start.sh --sync    puxa transacoes novas da Pluggy antes de atualizar
 #
 set -euo pipefail
@@ -20,7 +21,7 @@ if [ "${1:-}" = "--sync" ]; then
     || echo "==> Sem carteira de investimentos: saldos nao atualizados."
 fi
 
-echo "==> Atualizando relatorios a partir do Google Sheets..."
+echo "==> Atualizando relatorios..."
 uv run python -m finance.report
 
 # A carteira e opcional: quem ainda nao tem as abas de investimento segue sem ela.

@@ -26,7 +26,7 @@ from pathlib import Path
 import gspread
 from gspread.utils import ValueRenderOption, rowcol_to_a1
 
-from .config import DEFAULT_TIMEZONE, GOOGLE_SA_CREDENTIALS, ROOT, SHEET_ID
+from .config import BACKEND, DEFAULT_TIMEZONE, GOOGLE_SA_CREDENTIALS, ROOT, SHEET_ID
 
 SCHEMA_VERSION = 10
 
@@ -565,3 +565,20 @@ def check() -> dict:
     sh = open_sheet()
     return {"title": sh.title, "url": sh.url,
             "tabs": [w.title for w in sh.worksheets()]}
+
+
+# ---------------------------------------------------------------------- backend local
+# Com o backend SQLite, a mesma interface passa a gravar num arquivo local (ver
+# `config.BACKEND`). Fica no fim do módulo porque o backend local lê SCHEMAS daqui.
+INTERFACE = ("read_records", "write_records", "append_rows", "delete_row",
+             "read_columns", "update_fields", "update_changed_rows", "read_config",
+             "write_config", "ensure_tabs", "ensure_current_schema", "check",
+             "reset_cache")
+# A implementação do Google continua acessível no modo local: os testes dela e o
+# importador da planilha usam estas, não as do módulo.
+GOOGLE = {_name: globals()[_name] for _name in INTERFACE}
+LOCAL = BACKEND == "sqlite"
+if LOCAL:
+    from . import sqlite_store as _local
+    for _name in INTERFACE:
+        globals()[_name] = getattr(_local, _name)

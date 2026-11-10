@@ -1,6 +1,11 @@
 """Coerção tipada e migração das abas de investimento (sem rede)."""
 
+import pytest
+
 from finance import sheets
+
+# Testam a implementação do Google, qualquer que seja o backend da execução.
+pytestmark = pytest.mark.usefixtures("google_backend")
 
 INVEST_TABS = ["InvestTrades", "InvestAssets", "InvestAccounts", "InvestPolicy",
                "Quotes", "InvestSnapshots"]
@@ -91,7 +96,6 @@ class RecordingWorksheet:
 
 
 def test_quotes_tab_refuses_full_rewrite():
-    import pytest
     with pytest.raises(sheets.SheetsError) as err:
         sheets.write_records("Quotes", [{"ticker": "VOO"}])
     assert "fórmulas" in str(err.value)

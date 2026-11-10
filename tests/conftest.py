@@ -1,8 +1,16 @@
+import os
 import socket
+import tempfile
 
 import pytest
 
-from finance import sheets
+# Antes de importar o app: sem SHEET_ID o backend é o SQLite na pasta de dados do usuário,
+# e a suíte gravaria no banco de verdade de quem roda os testes. Um arquivo temporário
+# tira esse risco. A CI define FINANCE_DB e FINANCE_BACKEND para rodar nos dois modos.
+os.environ.setdefault("FINANCE_DB", os.path.join(tempfile.mkdtemp(prefix="finance-test-"),
+                                                 "finance.db"))
+
+from finance import sheets  # noqa: E402
 
 _PATCHABLE = ("read_records", "write_records", "read_config", "write_config",
               "update_changed_rows", "read_columns", "update_fields",
@@ -34,3 +42,27 @@ def block_network(request, monkeypatch):
 
     real_connect = socket.socket.connect
     monkeypatch.setattr(socket.socket, "connect", refuse)
+
+
+@pytest.fixture
+def google_backend(monkeypatch):
+    """Testes da implementação do Google rodam contra ela mesmo quando o backend da
+    execução é o SQLite: as funções dela chamam umas às outras pelo nome do módulo."""
+    for name, function in sheets.GOOGLE.items():
+        monkeypatch.setattr(sheets, name, function)
+    monkeypatch.setattr(sheets, "LOCAL", False)
+
+
+@pytest.fixture
+def local_db(tmp_path, monkeypatch):
+    """Backend SQLite num arquivo novo, qualquer que seja o backend da execução."""
+    from finance import sqlite_store
+
+    path = tmp_path / "finance.db"
+    sqlite_store.reset_cache()
+    monkeypatch.setattr(sqlite_store, "db_path", lambda: path)
+    for name in sheets.INTERFACE:
+        monkeypatch.setattr(sheets, name, getattr(sqlite_store, name))
+    monkeypatch.setattr(sheets, "LOCAL", True)
+    yield path
+    sqlite_store.reset_cache()

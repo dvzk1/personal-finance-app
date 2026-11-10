@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 import yaml
 
 from finance.config import SEED_DIR
@@ -59,6 +60,7 @@ def test_seed_portfolio_builds_and_can_be_planned():
     assert round(plan["allocated"] + plan["leftover"], 2) == 1000.0
 
 
+@pytest.mark.usefixtures("google_backend")
 def test_seed_quote_assets_get_a_formula():
     _, assets, _, _ = _fixtures()
     pending = Q.missing({}, assets)

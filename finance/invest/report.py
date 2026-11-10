@@ -21,6 +21,7 @@ from . import ledger_link as LL
 from . import plan as PL
 from . import policy as P
 from . import portfolio as PF
+from . import quote_sources as QS
 from . import quotes as Q
 from . import trades as T
 
@@ -161,6 +162,10 @@ def generate(write_snapshot: bool = True) -> dict:
     pending = Q.missing(quote_map, assets)
     if pending:
         Q.ensure(pending)
+    if sheets.LOCAL:
+        # sem fórmula no banco local, quem preenche o preço é o app
+        QS.report(QS.refresh())
+    if pending or sheets.LOCAL:
         quote_records = sheets.read_records(Q.TAB)
         quote_map = Q.load(quote_records)
 

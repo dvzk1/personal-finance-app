@@ -3,9 +3,13 @@
 Controle financeiro pessoal operado via Claude Code. As transações chegam do Open Finance
 (Pluggy). O Claude categoriza os gastos na conversa e grava as decisões via pipeline Python.
 
-> **Banco de dados = Google Sheets.** Ledger, regras, taxonomia e orçamento vivem numa planilha
-> do usuário (privada, na conta Google dele), **não no git**. O código é público/colaborável; os
-> dados, não. Esquema e auth em [`docs/SHEETS_INTEGRATION.md`](docs/SHEETS_INTEGRATION.md).
+> **Banco de dados = SQLite local ou Google Sheets**, um dos dois por instalação, com a mesma
+> interface (`finance/sheets.py`). Sem `SHEET_ID` no `.env`, é um arquivo SQLite na pasta de
+> dados do usuário (`config.db_path()`, fora do repositório); com `SHEET_ID`, é a planilha dele.
+> Ledger, regras, taxonomia e orçamento ficam lá, **não no git**. O código é
+> público/colaborável; os dados, não. Esquema das abas e auth do Google em
+> [`docs/SHEETS_INTEGRATION.md`](docs/SHEETS_INTEGRATION.md). "Aba" abaixo vale também como
+> tabela do SQLite.
 > Os dados em `data/seed/` são **sintéticos** (fonte do banco de demonstração).
 > **Nunca commitar `.env` nem `credentials.json`.**
 
@@ -14,26 +18,27 @@ Controle financeiro pessoal operado via Claude Code. As transações chegam do O
 ## Fluxo recorrente
 
 ```
-1. uv run python -m finance.sync --days N      # puxa transações da Pluggy → Sheets
+1. uv run python -m finance.sync --days N      # puxa transações da Pluggy → banco
 2. uv run python -m finance.show queue         # Fila do Claude + instruções das regras
-3. escrever data/.decisions.json + apply       # categoriza o que chegou (grava no Sheets)
+3. escrever data/.decisions.json + apply       # categoriza o que chegou (grava no banco)
 4. uv run python -m finance.report             # SEMPRE rodar após qualquer categorização
-5. git commit                                  # commitar só CÓDIGO/DOCS (dados já estão no Sheets)
+5. git commit                                  # commitar só CÓDIGO/DOCS (dados já estão no banco)
 ```
 
 Mexeu na carteira? `uv run python -m finance.invest report` depois de qualquer `apply`,
 pelo mesmo motivo do passo 4.
 
-> Os dados **persistem automaticamente no Google Sheets** a cada `apply`/`sync`. Não há mais
+> Os dados **persistem automaticamente no banco** a cada `apply`/`sync`. Não há mais
 > `ledger.jsonl` para commitar — o git guarda só código, docs e os fixtures sintéticos de
-> `data/seed/`. O histórico dos dados fica no *Histórico de versões* da própria planilha.
+> `data/seed/`. Na planilha, o histórico fica no *Histórico de versões*; no banco local, não
+> há histórico além de cópias do arquivo.
 
-Para abrir o dashboard no dia a dia: **`./start.sh`** (atualiza os relatórios a partir do Sheets
+Para abrir o dashboard no dia a dia: **`./start.sh`** (atualiza os relatórios a partir do banco
 e sobe o front num comando só; `./start.sh --sync` puxa da Pluggy antes).
 
 Comandos úteis de inspeção (só leitura, seguros):
 ```bash
-uv run python main.py                          # confere conexão Sheets + Pluggy
+uv run python main.py                          # confere o banco + Pluggy
 uv run python -m finance.show stats
 uv run python -m finance.show find "texto"
 uv run python -m finance.show cat "Categoria/Sub"
@@ -43,7 +48,7 @@ uv run python -m finance.categorize stats
 
 ---
 
-## Banco no Google Sheets (7 abas de gastos + 6 de investimentos)
+## Abas do banco (7 de gastos + 6 de investimentos)
 
 | Aba | Conteúdo | Módulo |
 |---|---|---|
@@ -58,28 +63,30 @@ uv run python -m finance.categorize stats
 | `InvestAssets` | catálogo: classe, conta, setor, alvo, como o valor é apurado | `finance/invest/assets.py` |
 | `InvestAccounts` | onde o dinheiro está custodiado (corretora, carteira, caixinhas) | `finance/invest/accounts.py` |
 | `InvestPolicy` | política de alocação como árvore, com o papel de cada nó | `finance/invest/policy.py` |
-| `Quotes` | cotações via `GOOGLEFINANCE` (**única aba com fórmula**) | `finance/invest/quotes.py` |
+| `Quotes` | cotações: `GOOGLEFINANCE` na planilha (**única aba com fórmula**), provedores gratuitos no banco local | `finance/invest/quotes.py`, `finance/invest/quote_sources/` |
 | `InvestSnapshots` | 1 linha por nó por dia: histórico de patrimônio | `finance/invest/report.py` |
 
 `Config[timezone]` guarda o fuso IANA usado para transformar timestamps UTC da Pluggy em datas
 locais. O padrão é `America/Sao_Paulo`; nunca derive datas financeiras do fuso do computador.
 
-A camada de acesso é `finance/sheets.py` (auth via Service Account, 1 request por operação,
-retry com backoff). Se algo falhar, `uv run python main.py` dá o diagnóstico. Para (re)inicializar
+A camada de acesso é `finance/sheets.py` (Google: auth via Service Account, 1 request por
+operação, retry com backoff; local: `finance/sqlite_store.py`). Se algo falhar, `uv run python main.py` dá o diagnóstico. Para (re)inicializar
 o banco: `uv run python -m finance.seed [--force]`.
 
 ---
 
 ## Investimentos (segundo espaço do app)
 
-Carteira derivada das movimentações, com cotação vinda do `GOOGLEFINANCE` da própria
-planilha. É opcional: quem só controla gastos nunca cria essas abas.
+Carteira derivada das movimentações, com cotação vinda do `GOOGLEFINANCE` (planilha) ou de
+provedores gratuitos (banco local: Yahoo, brapi com `BRAPI_TOKEN`, Banco Central; ordem em
+`QUOTE_PROVIDERS`). É opcional: quem só controla gastos nunca cria essas abas.
 
 ```bash
 uv run python -m finance.invest show          # resumo da carteira
 uv run python -m finance.invest plan 3000     # simula um aporte
 uv run python -m finance.invest report        # gera data/reports/invest.json
 uv run python -m finance.invest sync          # confere com as corretoras via Pluggy
+uv run python -m finance.invest quotes --force # busca cotações agora (só banco local)
 uv run python -m finance.invest apply         # aplica data/.invest_decisions.json
 uv run python -m finance.seed --invest        # carteira de demonstração (sintética)
 ```
@@ -435,7 +442,8 @@ open("data/.claude_queue.jsonl", "w").close()
 
 - `.env` (SHEET_ID + credenciais Pluggy) e `credentials.json` (chave da Service Account) estão no
   `.gitignore` — **nunca commitar, nunca expor**.
-- Os dados financeiros vivem na **planilha do Google Sheets do usuário**, fora do git.
+- Os dados financeiros vivem no **banco do usuário** (arquivo SQLite na pasta de dados dele ou
+  planilha do Google Sheets), fora do git.
 - Arquivos de trabalho efêmeros e locais (`data/.to_categorize.json`, `data/.decisions.json`,
   `data/.budget_input.json`, `data/.claude_queue.jsonl`, `data/.invest_decisions.json`,
   `data/.invest_pending.json`, `data/.reimbursements.json`) e os relatórios gerados (`data/reports/`) também estão no
