@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import sheets
 from .config import REPORTS_DIR
+from .errors import FinanceError, run_cli
 from .ledger import normalize_tags, update_tags
 
 EDITABLE = {"category", "subcategory", "note", "tags", "splits",
@@ -30,15 +31,15 @@ def _taxonomy() -> dict:
 def _validate(fields: dict, tax: dict) -> None:
     desconhecidos = set(fields) - EDITABLE
     if desconhecidos:
-        raise ValueError(f"campos não editáveis: {sorted(desconhecidos)}")
+        raise FinanceError(f"campos não editáveis: {sorted(desconhecidos)}")
     category = fields.get("category")
     if not category or not tax:
         return
     if category not in tax:
-        raise ValueError(f"categoria inexistente: {category!r}")
+        raise FinanceError(f"categoria inexistente: {category!r}")
     subcategory = fields.get("subcategory")
     if subcategory and subcategory not in (tax[category] or []):
-        raise ValueError(f"subcategoria inexistente em {category}: {subcategory!r}")
+        raise FinanceError(f"subcategoria inexistente em {category}: {subcategory!r}")
 
 
 def _locate(precisa_tags: bool) -> tuple[dict, dict]:
@@ -105,4 +106,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

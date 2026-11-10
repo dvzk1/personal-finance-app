@@ -1,6 +1,7 @@
 import pytest
 
 from finance import balance
+from finance.errors import FinanceError
 
 
 def test_without_anchor_accumulates_from_first_month():
@@ -36,5 +37,5 @@ def test_parse_anchor_normalizes_and_accepts_empty():
     "2030-02-10",
 ])
 def test_parse_anchor_rejects_malformed_values(raw):
-    with pytest.raises(SystemExit):
+    with pytest.raises(FinanceError):
         balance.parse_anchor(raw)

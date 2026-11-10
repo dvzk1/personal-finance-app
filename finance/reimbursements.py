@@ -8,12 +8,13 @@ Uso:
 
 import argparse
 import json
-import sys
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from . import ledger as L
 from . import sheets
+from .errors import FinanceError, run_cli
 
 TAB = "Reimbursements"
 _TOLERANCE = 0.005
@@ -196,20 +197,26 @@ def apply_changes(ledger: dict, add: list[dict], remove: list[str]) -> tuple[int
     return len(created), removed, []
 
 
+def apply(add: list | None, remove: list | None) -> dict:
+    """Grava abatimentos novos e remove os pedidos. Tudo ou nada: se algum novo não
+    fecha, nenhum é gravado e a recusa diz por quê."""
+    sheets.ensure_current_schema()
+    created, removed, problems = apply_changes(L.load_ledger(), add, remove)
+    if problems:
+        raise FinanceError("Nenhum abatimento gravado:\n" + "\n".join(problems))
+    return {"created": created, "removed": removed}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="finance.reimbursements")
     sub = parser.add_subparsers(dest="cmd", required=True)
     apply_parser = sub.add_parser("apply")
     apply_parser.add_argument("file")
     args = parser.parse_args()
-    payload = json.loads(open(args.file).read())
-    sheets.ensure_current_schema()
-    created, removed, problems = apply_changes(
-        L.load_ledger(), payload.get("add"), payload.get("remove"))
-    if problems:
-        sys.exit("Nenhum abatimento gravado:\n" + "\n".join(problems))
-    print(f"Abatimentos: +{created} criados, -{removed} removidos.")
+    payload = json.loads(Path(args.file).read_text())
+    result = apply(payload.get("add"), payload.get("remove"))
+    print(f"Abatimentos: +{result['created']} criados, -{result['removed']} removidos.")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

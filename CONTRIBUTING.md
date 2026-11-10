@@ -52,6 +52,10 @@ chave (`credentials*.json`, `service_account*.json`, `.env.*`, `*.pem`). Ainda a
 
 - **Commits** curtos e no imperativo, sem trailer de coautoria.
 - **Python** segue o estilo do código existente (funções enxutas, docstrings curtas em pt-BR).
+- **Regra de negócio não imprime nem encerra o processo.** Ela recebe dados, devolve o
+  resultado e levanta `FinanceError` (`finance/errors.py`) quando recusa. O `main` de cada
+  módulo é uma casca que formata o resultado e roda sob `run_cli`, e o dashboard chama as
+  mesmas funções (`categorize.apply_decisions`, `report.build`, `invest.operations`).
 - Mudou a persistência? Veja o contrato da camada Sheets em
   [`docs/SHEETS_INTEGRATION.md`](docs/SHEETS_INTEGRATION.md) e mantenha os testes de round-trip
   verdes.

@@ -15,6 +15,7 @@ import unicodedata
 from calendar import monthrange
 from collections import Counter, defaultdict
 from datetime import date, datetime, timezone
+from typing import NamedTuple
 
 from . import balance as BAL
 from . import budgets as B
@@ -24,17 +25,18 @@ from . import rules as R
 from . import taxonomy as T
 from . import transaction_dates as TD
 from .config import REPORTS_DIR, ensure_dirs
+from .errors import FinanceError, run_cli
 from .invest import ledger_link as LL
 
-# Tratamento por categoria (fluxo|poupança|movimento) — fonte da verdade é a taxonomia.
-# Carregado uma vez em main(); as funções abaixo consultam via _tr().
-_TREAT: dict = {}
-_SAVING_SUBS: tuple = LL.DESTINATION_SUBCATEGORIES
-_FREE_TICKERS: frozenset = frozenset()
 
+class Ctx(NamedTuple):
+    """O que decide como cada lançamento entra na conta, carregado uma vez por relatório."""
+    treatments: dict                     # categoria -> fluxo | poupança | movimento
+    saving_subs: tuple = LL.DESTINATION_SUBCATEGORIES   # aporte e resgate
+    free_tickers: frozenset = frozenset()               # destinos em nó `free`
 
-def _tr(cat: str | None) -> str:
-    return T.treatment_of(_TREAT, cat)
+    def tr(self, cat: str | None) -> str:
+        return T.treatment_of(self.treatments, cat)
 
 
 def _is_rendimento(sub: str | None) -> bool:
@@ -87,14 +89,14 @@ def _blank() -> dict:
             "poupanca": _flowbucket()}
 
 
-def _post(bucket: dict, amt: float, cat: str, sub: str) -> None:
+def _post(ctx: Ctx, bucket: dict, amt: float, cat: str, sub: str) -> None:
     if not amt:
         return
     cat = cat or "Outros"
     sub = sub or "—"
-    treat = _tr(cat)
+    treat = ctx.tr(cat)
     # poupança fora de aporte/resgate/rendimento (ex.: custo) é consumo real
-    if treat == "poupança" and not _is_rendimento(sub) and sub not in _SAVING_SUBS:
+    if treat == "poupança" and not _is_rendimento(sub) and sub not in ctx.saving_subs:
         treat = "fluxo"
     if treat != "fluxo":
         key = "poupanca" if treat == "poupança" else "movements"
@@ -123,55 +125,55 @@ def _post(bucket: dict, amt: float, cat: str, sub: str) -> None:
     s["count"] += 1
 
 
-def _add(bucket: dict, rec: dict) -> None:
+def _add(ctx: Ctx, bucket: dict, rec: dict) -> None:
     """Lança no agregado. Se o registro tem `splits`, cada parte é lançada
     na sua própria categoria (a sua parte conta no fluxo; a parte adiantada
     cai em Compartilhado e some do fluxo)."""
     splits = rec.get("splits")
     if splits:
         for sp in splits:
-            _post(bucket, sp["amount"], sp.get("category"),
+            _post(ctx, bucket, sp["amount"], sp.get("category"),
                   sp.get("subcategory"))
         return
-    _post(bucket, rec["signed_amount"], rec["category"], rec["subcategory"])
+    _post(ctx, bucket, rec["signed_amount"], rec["category"], rec["subcategory"])
 
 
-def _free_share(rec: dict) -> float:
+def _free_share(ctx: Ctx, rec: dict) -> float:
     """Parte do aporte/resgate com destino num nó `free`: continua dinheiro livre."""
     info = rec.get("invest")
     if not info or not info.get("needed"):
         return 0.0
     free = sum(abs(link["amount"]) for link in info.get("links", [])
-               if link["ticker"] in _FREE_TICKERS)
+               if link["ticker"] in ctx.free_tickers)
     return min(free, info["needed"])
 
 
-def _add_record(bucket: dict, rec: dict) -> None:
-    _add(bucket, _net(rec))
-    share = _free_share(rec)
+def _add_record(ctx: Ctx, bucket: dict, rec: dict) -> None:
+    _add(ctx, bucket, _net(ctx, rec))
+    share = _free_share(ctx, rec)
     if share:
         direction = 1 if rec["signed_amount"] < 0 else -1
         bucket["saved"] -= direction * share
         bucket["moved_to_free"] += direction * share
 
 
-def _reduce(amount: float, abated: float, cat: str | None) -> float:
-    if not abated or _tr(cat or "Outros") != "fluxo":
+def _reduce(ctx: Ctx, amount: float, abated: float, cat: str | None) -> float:
+    if not abated or ctx.tr(cat or "Outros") != "fluxo":
         return amount
     return round(amount - abated if amount > 0 else amount + abated, 2)
 
 
-def _net(rec: dict) -> dict:
+def _net(ctx: Ctx, rec: dict) -> dict:
     """Cópia para os agregados: o valor abatido sai do fluxo; movimento fica intacto."""
     info = rec.get("reimbursed")
     if not info:
         return rec
     if rec.get("splits"):
         return {**rec, "splits": [
-            {**part, "amount": _reduce(part["amount"], info["parts"].get(i, 0.0),
+            {**part, "amount": _reduce(ctx, part["amount"], info["parts"].get(i, 0.0),
                                        part.get("category"))}
             for i, part in enumerate(rec["splits"])]}
-    return {**rec, "signed_amount": _reduce(rec["signed_amount"], info["amount"],
+    return {**rec, "signed_amount": _reduce(ctx, rec["signed_amount"], info["amount"],
                                             rec["category"])}
 
 
@@ -380,8 +382,8 @@ def _savings(b: dict, cum_in: float, cum_out: float, mon_in: float,
     }
 
 
-def _insights(plan: dict, mj: dict, prev_mj: dict | None,
-               txns: list, savings: dict) -> list:
+def _insights(ctx: Ctx, plan: dict, mj: dict, prev_mj: dict | None,
+              txns: list, savings: dict) -> list:
     out = []
     for r in plan["categories"]:
         if r["status"] == "estourou":
@@ -410,7 +412,7 @@ def _insights(plan: dict, mj: dict, prev_mj: dict | None,
     cash = [t for t in txns
             if t["signed_amount"] < 0 and not t.get("splits")
             and not t.get("excluded") and not t.get("reimbursed")
-            and _tr(t["category"]) == "fluxo"]
+            and ctx.tr(t["category"]) == "fluxo"]
     if cash:
         big = min(cash, key=lambda t: t["signed_amount"])
         out.append({"sev": "info", "text":
@@ -428,14 +430,14 @@ def _insights(plan: dict, mj: dict, prev_mj: dict | None,
     return out[:7]
 
 
-def _recurring(recs: list) -> list:
+def _recurring(ctx: Ctx, recs: list) -> list:
     """Assinaturas/recorrências: agrupa por lojista, cadência ~regular."""
     groups: dict = defaultdict(list)
     for r in recs:
         if r.get("excluded") or r["signed_amount"] >= 0 or r.get("splits"):
             continue
         cat = r["category"] or "Outros"
-        if _tr(cat) != "fluxo" or cat == "Alimentação":
+        if ctx.tr(cat) != "fluxo" or cat == "Alimentação":
             continue
         if (r.get("subcategory") or "") == "Combustível":
             continue
@@ -483,7 +485,7 @@ def _recurring(recs: list) -> list:
     return out[:40]
 
 
-def _rules_json(rules: list, recs: list) -> dict:
+def _rules_json(rules: list, recs: list, generated_at: str) -> dict:
     usage: dict = defaultdict(lambda: {"count": 0, "last_date": None})
     for r in recs:
         if r.get("category_source") == "rule" and r.get("rule_id"):
@@ -493,7 +495,7 @@ def _rules_json(rules: list, recs: list) -> dict:
     ordered = ([r for r in rules if R.has_amount_range(r)]
                + [r for r in rules if not R.has_amount_range(r)])
     return {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at,
         "rules": [{**{k: r.get(k) for k in (
             "id", "field", "match", "value", "category", "subcategory", "note",
             "propagate_note", "instruction", "type", "amount_abs_min",
@@ -503,17 +505,17 @@ def _rules_json(rules: list, recs: list) -> dict:
     }
 
 
-def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
-             month=None, category_meta=None, subcategory_meta=None,
-             rules=None, reimbursement_links=None) -> None:
-    """Gera os relatórios (arquivos em REPORTS_DIR).
+def build(recs=None, taxonomy=None, treatments=None, budgets=None,
+          category_meta=None, subcategory_meta=None, rules=None,
+          reimbursement_links=None, today: date | None = None) -> dict:
+    """Calcula os relatórios e devolve tudo em memória, sem gravar nada.
 
-    Aceita ledger/taxonomia/tratamentos/budgets já carregados para evitar reler
-    do Google Sheets quando o chamador (ex.: categorize.apply) já os tem em
-    memória — cada leitura do Sheets custa ~0,5–2s. O que vier None é lido sob
-    demanda."""
-    ensure_dirs()
-    global _TREAT, _SAVING_SUBS, _FREE_TICKERS
+    Aceita ledger, taxonomia, tratamentos e orçamento já carregados, para quem já os tem
+    (o `categorize` acabou de ler) não pagar outra leitura do backend. O que vier None é
+    lido aqui. Os registros recebidos não são alterados.
+
+    Devolve `months` (o JSON de cada mês, com transações), `markdown` (o resumo de cada
+    mês), `dashboard`, `rules` e `warnings` (abatimentos ignorados)."""
     if treatments is None or taxonomy is None or category_meta is None:
         tax_l, treat_l, meta_l = T.load_full()   # 1 request serve aos três
         taxonomy = taxonomy if taxonomy is not None else tax_l
@@ -521,15 +523,17 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
         category_meta = category_meta if category_meta is not None else meta_l
     if subcategory_meta is None:
         subcategory_meta = T.load_subcategory_meta(taxonomy)
-    _TREAT = treatments
     if recs is None:
         recs = list(L.load_ledger().values())
     if not recs:
-        raise SystemExit("Ledger vazio. Rode antes: uv run python -m finance.sync --backfill")
+        raise FinanceError("Ledger vazio. Rode antes: uv run python -m finance.sync --backfill")
+    # Cópia rasa: os campos calculados abaixo (valor efetivo, hora, abatimento, destino)
+    # não vazam para o ledger de quem chamou, que pode gravá-lo depois.
+    recs = [dict(r) for r in recs]
+    warnings = []
 
-    # Aplica o override manual de valor (cópia em memória; o ledger no disco
-    # mantém signed_amount cru + amount_override). Tudo a jusante (agregados,
-    # splits, insights, recorrências, dashboard) passa a ver o valor efetivo.
+    # Aplica o override manual de valor. Tudo a jusante (agregados, splits, insights,
+    # recorrências, dashboard) passa a ver o valor efetivo.
     tz = TD.load_timezone()
     for r in recs:
         ov = r.get("amount_override")
@@ -549,14 +553,14 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
         reimbursement_links = RB.load()
     by_tx, discarded = RB.index(reimbursement_links, {r["id"]: r for r in recs})
     for link_id, problem in discarded:
-        print(f"⚠ abatimento {link_id} ignorado: {problem}")
+        warnings.append(f"abatimento {link_id} ignorado: {problem}")
     for r in recs:
         r["reimbursed"] = by_tx.get(r["id"])
     invest = _invest_context()
-    _SAVING_SUBS = (invest["subcategories"] if invest
-                    else LL.load_destination_subcategories())
-    _FREE_TICKERS = frozenset(invest.get("free_tickers", ()))
-    invest_status = (LL.destination_status(recs, invest["trades"], _TREAT,
+    ctx = Ctx(treatments,
+              invest["subcategories"] if invest else LL.load_destination_subcategories(),
+              frozenset(invest.get("free_tickers", ())))
+    invest_status = (LL.destination_status(recs, invest["trades"], treatments,
                                            invest["assets"], invest["subcategories"])
                      if invest else {})
     for r in recs:
@@ -572,9 +576,9 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
         after_anchor.setdefault(m, _blank())
         month_txns.setdefault(m, []).append(r)   # lista mostra tudo (rasurado incluso)
         if not r.get("excluded"):                 # mas rasurado não entra nos agregados
-            _add_record(months[m], r)
+            _add_record(ctx, months[m], r)
             if BAL.counts_after(r["date"], anchor):
-                _add_record(after_anchor[m], r)
+                _add_record(ctx, after_anchor[m], r)
 
     ordered = sorted(months)
     # Agregados enxutos (vão para o dashboard.json — carga rápida, sem transações).
@@ -587,7 +591,7 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
 
     # ---- planejamento por mês (teto vs realizado, ritmo) + poupança acumulada
     bud = budgets if budgets is not None else B.load()
-    today = date.today()
+    today = today or date.today()
     cum_in = cum_out = 0.0
     savings_by_month: dict = {}
     for m in ordered:
@@ -598,49 +602,38 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
                                        rsv["in"], rsv["out"])
         month_jsons[m]["plan"] = _plan_for_month(bud, month_jsons[m], m, today)
 
-    targets = [month] if month else ordered
+    month_files, markdown = {}, {}
     for i, m in enumerate(ordered):
-        if m not in targets:
-            continue
         mj = month_jsons[m]
         prev = month_jsons[ordered[i - 1]] if i > 0 else None
         txns = [{**{k: r.get(k) for k in _TXN_FIELDS}, "splits": r.get("splits"),
                  "reimbursed": r.get("reimbursed"), "invest": r.get("invest")}
                 for r in sorted(month_txns[m], key=lambda r: (r["date"], r["id"]))]
-        insights = _insights(mj["plan"], mj, prev, txns, savings_by_month[m])
+        insights = _insights(ctx, mj["plan"], mj, prev, txns, savings_by_month[m])
         # O arquivo mensal carrega os agregados + transações + plano (consumidos no front).
-        (REPORTS_DIR / f"{m}.json").write_text(
-            json.dumps({**mj, "transactions": txns,
-                        "savings": savings_by_month[m], "insights": insights},
-                       ensure_ascii=False, indent=2) + "\n")
-        (REPORTS_DIR / f"{m}.md").write_text(_md(mj, prev))
-
-    # Numa varredura completa, apaga meses que saíram do ledger — senão o disco
-    # guarda dados já removidos e o front pode servi-los num F5.
-    if not month:
-        vivos = {f"{m}.{ext}" for m in ordered for ext in ("json", "md")}
-        for antigo in REPORTS_DIR.glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].*"):
-            if antigo.name not in vivos:
-                antigo.unlink()
+        month_files[m] = {**mj, "transactions": txns,
+                          "savings": savings_by_month[m], "insights": insights}
+        markdown[m] = _md(mj, prev)
 
     # ---- dashboard.json (consumido pelo frontend)
     by_cat12: dict = defaultdict(lambda: {"expense": 0.0, "income": 0.0, "count": 0})
-    for r in map(_net, recs):
+    for r in (_net(ctx, r) for r in recs):
         if r.get("excluded"):
             continue
         parts = (r["splits"] if r.get("splits")
                  else [{"amount": r["signed_amount"], "category": r["category"]}])
         for pt in parts:
             cat = pt.get("category") or "Outros"
-            if _tr(cat) != "fluxo":
+            if ctx.tr(cat) != "fluxo":
                 continue
             c = by_cat12[cat]
             a = pt["amount"]
             c["expense" if a < 0 else "income"] += abs(a)
             c["count"] += 1
     recent = sorted(recs, key=lambda r: r["date"], reverse=True)[:60]
+    generated_at = datetime.now(timezone.utc).isoformat()
     dash = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": generated_at,
         "currency": "BRL",
         "taxonomy": taxonomy,
         # cor/ícone por categoria: vêm da planilha, o front cai num neutro se faltar
@@ -650,12 +643,12 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
         "essential_cats": sorted(c for c, m in (category_meta or {}).items()
                                  if m.get("essential")),
         "budgets": bud,
-        "recurring": _recurring([_net(r) for r in recs]),
+        "recurring": _recurring(ctx, [_net(ctx, r) for r in recs]),
         # tratamento por categoria (fonte da verdade da taxonomia) + listas derivadas
-        "treatments": _TREAT,
-        "cashflow_excludes": sorted(c for c, t in _TREAT.items() if t != "fluxo"),
-        "poupanca_cats": sorted(c for c, t in _TREAT.items() if t == "poupança"),
-        "movimento_cats": sorted(c for c, t in _TREAT.items() if t == "movimento"),
+        "treatments": treatments,
+        "cashflow_excludes": sorted(c for c, t in treatments.items() if t != "fluxo"),
+        "poupanca_cats": sorted(c for c, t in treatments.items() if t == "poupança"),
+        "movimento_cats": sorted(c for c, t in treatments.items() if t == "movimento"),
         "months": [month_jsons[m] for m in ordered],
         # base do Saldo total; sem âncora, o total é o acumulado desde o primeiro mês
         "balance_anchor": anchor,
@@ -688,26 +681,65 @@ def generate(recs=None, taxonomy=None, treatments=None, budgets=None,
         "reimbursement_suggestions": RB.suggestions(recs, by_tx),
     }
     dash["pending"] = len(dash["review"])
-    (REPORTS_DIR / "dashboard.json").write_text(
-        json.dumps(dash, ensure_ascii=False, indent=2) + "\n")
     if rules is None:
         rules = R.load_rules()["rules"]
-    (REPORTS_DIR / "rules.json").write_text(
-        json.dumps(_rules_json(rules, recs), ensure_ascii=False, indent=2) + "\n")
+    return {"months": month_files, "markdown": markdown, "dashboard": dash,
+            "rules": _rules_json(rules, recs, generated_at), "warnings": warnings}
 
-    last = month_jsons[ordered[-1]]
-    print(f"Relatórios gerados em {REPORTS_DIR} ({len(targets)} mês(es) + dashboard.json)")
-    print(f"Último mês {last['month']}: receitas R$ {last['income']:,.2f} | "
-          f"gastos R$ {last['expense']:,.2f} | poupado R$ {last['saved']:,.2f} | "
-          f"saldo R$ {last['net']:,.2f}")
+
+def _dump(obj) -> str:
+    return json.dumps(obj, ensure_ascii=False, indent=2) + "\n"
+
+
+def write(result: dict, month: str | None = None) -> list[str]:
+    """Grava em REPORTS_DIR o que `build` calculou. Com `month`, só aquele mês (mais o
+    dashboard e as regras). Devolve os meses gravados."""
+    ensure_dirs()
+    targets = [month] if month else sorted(result["months"])
+    for m in targets:
+        (REPORTS_DIR / f"{m}.json").write_text(_dump(result["months"][m]))
+        (REPORTS_DIR / f"{m}.md").write_text(result["markdown"][m])
+    # Numa varredura completa, apaga meses que saíram do ledger — senão o disco
+    # guarda dados já removidos e o front pode servi-los num F5.
+    if not month:
+        vivos = {f"{m}.{ext}" for m in targets for ext in ("json", "md")}
+        for antigo in REPORTS_DIR.glob("[0-9][0-9][0-9][0-9]-[0-9][0-9].*"):
+            if antigo.name not in vivos:
+                antigo.unlink()
+    (REPORTS_DIR / "dashboard.json").write_text(_dump(result["dashboard"]))
+    (REPORTS_DIR / "rules.json").write_text(_dump(result["rules"]))
+    return targets
+
+
+def generate(month: str | None = None, **inputs) -> dict:
+    """Calcula e grava os relatórios. `inputs` são os de `build`."""
+    result = build(**inputs)
+    if month and month not in result["months"]:
+        raise FinanceError(f"Sem lançamentos em {month}.")
+    result["written"] = write(result, month)
+    return result
+
+
+def summary(result: dict) -> list[str]:
+    """Linhas para o terminal: avisos, onde gravou e os números do último mês."""
+    last = result["dashboard"]["months"][-1]
+    lines = [f"⚠ {warning}" for warning in result["warnings"]]
+    written = result.get("written")
+    if written is not None:
+        lines.append(f"Relatórios gerados em {REPORTS_DIR} "
+                     f"({len(written)} mês(es) + dashboard.json)")
+    lines.append(f"Último mês {last['month']}: receitas R$ {last['income']:,.2f} | "
+                 f"gastos R$ {last['expense']:,.2f} | poupado R$ {last['saved']:,.2f} | "
+                 f"saldo R$ {last['net']:,.2f}")
+    return lines
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Relatórios financeiros.")
     ap.add_argument("--month", help="Gera só esse mês (YYYY-MM).")
     args = ap.parse_args()
-    generate(month=args.month)
+    print("\n".join(summary(generate(month=args.month))))
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

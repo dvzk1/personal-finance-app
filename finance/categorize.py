@@ -13,7 +13,6 @@ Precedência: manual > regra > mapa-pluggy. `reviewed` indica confirmação huma
 
 import argparse
 import json
-import sys
 from collections import Counter
 from datetime import datetime, timezone
 from statistics import median
@@ -25,6 +24,7 @@ from . import rules as R
 from . import sheets
 from . import taxonomy as T
 from .config import DECISIONS_FILE, TO_CATEGORIZE_FILE, ensure_dirs
+from .errors import FinanceError, run_cli
 
 _COMPACT = ("id", "date", "description", "signed_amount", "type", "account_name",
             "pluggy_category", "merchant_name", "counterparty", "mcc",
@@ -54,7 +54,7 @@ def prepare() -> None:
     rules = rules_data["rules"]
     ledger = L.load_ledger()
     if not ledger:
-        sys.exit("Ledger vazio. Rode antes: uv run python -m finance.sync --backfill")
+        raise FinanceError("Ledger vazio. Rode antes: uv run python -m finance.sync --backfill")
 
     by_rule = by_map = still = 0
     for rec in ledger.values():
@@ -167,13 +167,16 @@ def _statement_trade(row: dict, ledger_id: str) -> dict | None:
             "ledger_id": ledger_id, "note": row.get("note") or row["description"]}
 
 
-def _import_statement(ledger: dict, rows: list[dict]) -> tuple[int, list[dict]]:
-    """Grava as linhas de extrato novas; as que já existem são puladas."""
+def _import_statement(ledger: dict, rows: list[dict],
+                      warnings: list | None = None) -> tuple[int, list[dict]]:
+    """Grava as linhas de extrato novas; as que já existem são puladas e avisadas."""
     added, trades = 0, []
     for row in rows:
         duplicate = L.duplicate_of(ledger, row)
         if duplicate:
-            print(f"  = já no Ledger: {row['date']} {row['description']} ({duplicate})")
+            if warnings is not None:
+                warnings.append(f"já no Ledger: {row['date']} {row['description']} "
+                                f"({duplicate})")
             continue
         record = L.manual_record(row, ledger)
         ledger[record["id"]] = record
@@ -184,17 +187,17 @@ def _import_statement(ledger: dict, rows: list[dict]) -> tuple[int, list[dict]]:
     return added, trades
 
 
-def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -> None:
-    """Aplica o arquivo de decisões. Com `decisions`, usa esse dict e não toca no arquivo:
-    `reapply` passa {} para só reaplicar as regras em todo lançamento não manual."""
-    from_file = decisions is None
-    if from_file and not DECISIONS_FILE.exists():
-        sys.exit(f"Não encontrei {DECISIONS_FILE}. O agente deve gravá-lo antes.")
+def apply_decisions(dec: dict, learn: bool = False, report: bool = False) -> dict:
+    """Aplica decisões (o formato do `.decisions.json`) e devolve o que mudou.
+
+    `{}` só reaplica as regras em todo lançamento não manual. Com `report`, regera os
+    relatórios reaproveitando o que já está em memória e devolve o resultado em
+    `report`. Avisos (divisão que não fecha, abatimento recusado) vêm em `warnings`."""
     sheets.ensure_current_schema()
     tax, treats = T.load_all()   # 1 leitura da Taxonomy p/ taxonomia + tratamentos
     rules_data = R.load_rules()
     ledger = L.load_ledger()
-    dec = json.loads(DECISIONS_FILE.read_text()) if from_file else decisions
+    warnings = []
     # foto do estado antes das mudanças p/ gravar só as linhas que de fato mudarem
     before = {tid: L.snapshot(rec) for tid, rec in ledger.items()}
 
@@ -212,7 +215,8 @@ def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -
         R.save_rules(rules_data)
 
     # 1b) lançamentos de extrato que a Pluggy não trouxe
-    imported, invest_rows = _import_statement(ledger, dec.get("manual_transactions", []))
+    imported, invest_rows = _import_statement(ledger, dec.get("manual_transactions", []),
+                                              warnings)
 
     # 2) reaplica todas as regras (regra vence mapa-pluggy; manual é intocável)
     rules = rules_data["rules"]
@@ -262,8 +266,8 @@ def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -
                 if rec.get("splits") and "amount_override" in a:
                     tot = round(sum(s["amount"] for s in rec["splits"]), 2)
                     if abs(tot - L.effective_amount(rec)) > 0.01:
-                        print(f"  ⚠ {tid}: a divisão soma {tot} e o valor agora é "
-                              f"{L.effective_amount(rec)}; refaça a divisão")
+                        warnings.append(f"{tid}: a divisão soma {tot} e o valor agora é "
+                                        f"{L.effective_amount(rec)}; refaça a divisão")
                 if "note" in a:
                     rec["note"] = (a["note"] or None)
                 assigned += 1
@@ -273,8 +277,7 @@ def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -
                 eff = L.effective_amount(rec)
                 tot = round(sum(s["amount"] for s in splits), 2)
                 if abs(tot - eff) > 0.01:
-                    print(f"  ⚠ split de {tid}: soma {tot} ≠ "
-                          f"{eff} — ignorado")
+                    warnings.append(f"split de {tid}: soma {tot} ≠ {eff} — ignorado")
                     continue
                 rec.update(splits=splits, category_source="split",
                            rule_id=None, needs_review=False, reviewed=True)
@@ -307,56 +310,95 @@ def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -
     if invest_rows:
         from .invest import trades as invest_trades
         invest_trades.append(invest_rows)
-        print(f"Carteira: {len(invest_rows)} movimentação(ões) ligadas ao extrato.")
+    reimbursed = None
     if dec.get("reimbursements") or dec.get("reimbursements_remove"):
         created, removed, problems = RB.apply_changes(
             ledger, dec.get("reimbursements"), dec.get("reimbursements_remove"))
-        for problem in problems:
-            print(f"  ⚠ abatimento não gravado: {problem}")
-        print(f"Abatimentos: +{created} criados, -{removed} removidos.")
+        warnings += [f"abatimento não gravado: {problem}" for problem in problems]
+        reimbursed = {"created": created, "removed": removed}
+
+    result = {"new_rules": len(new_rules), "imported": imported,
+              "invest_trades": len(invest_rows), "reapplied": reapplied,
+              "assigned": assigned, "confirmed": confirmed, "written": len(changed),
+              "reimbursements": reimbursed, "invalid": invalid, "warnings": warnings,
+              "stats": _stats(ledger), "report": None}
+    # regera os relatórios reaproveitando o ledger e a taxonomia já em memória,
+    # em vez de reler tudo do backend
+    if report:
+        from . import report as RP
+        result["report"] = RP.generate(recs=list(ledger.values()), taxonomy=tax,
+                                       treatments=treats, rules=rules)
+    return result
+
+
+def summary(result: dict) -> list[str]:
+    """Linhas para o terminal com o resultado de `apply_decisions`."""
+    lines = [f"  ⚠ {warning}" for warning in result["warnings"]]
+    if result["invest_trades"]:
+        lines.append(f"Carteira: {result['invest_trades']} movimentação(ões) "
+                     "ligadas ao extrato.")
+    if result["reimbursements"]:
+        lines.append(f"Abatimentos: +{result['reimbursements']['created']} criados, "
+                     f"-{result['reimbursements']['removed']} removidos.")
+    if result["imported"]:
+        lines.append(f"Extrato: +{result['imported']} lançamento(s) novo(s).")
+    lines.append(f"Regras novas: {result['new_rules']} | reaplicadas por regra: "
+                 f"{result['reapplied']} | atribuições: {result['assigned']} | "
+                 f"provisórias confirmadas: {result['confirmed']} | "
+                 f"linhas gravadas: {result['written']}")
+    invalid = result["invalid"]
+    if invalid:
+        lines.append(f"\n⚠ {len(invalid)} fora da taxonomia "
+                     "(corrija a taxonomia ou as decisões):")
+        lines += [f"  {tid}: {c} / {s}" for tid, c, s in invalid[:15]]
+    lines.append(_stats_line(result["stats"]))
+    if result["report"]:
+        from . import report as RP
+        lines += RP.summary(result["report"])
+    return lines
+
+
+def apply(learn: bool, do_report: bool = False, decisions: dict | None = None) -> dict:
+    """Linha de comando: aplica o arquivo de decisões (ou `decisions`, sem tocar no
+    arquivo), imprime o resultado e apaga os arquivos de trabalho."""
+    from_file = decisions is None
+    if from_file:
+        if not DECISIONS_FILE.exists():
+            raise FinanceError(f"Não encontrei {DECISIONS_FILE}. O agente deve gravá-lo antes.")
+        decisions = json.loads(DECISIONS_FILE.read_text())
+    result = apply_decisions(decisions, learn=learn, report=do_report)
     if from_file:
         TO_CATEGORIZE_FILE.unlink(missing_ok=True)
         DECISIONS_FILE.unlink(missing_ok=True)
-
-    if imported:
-        print(f"Extrato: +{imported} lançamento(s) novo(s).")
-    print(f"Regras novas: {len(new_rules)} | reaplicadas por regra: {reapplied} | "
-          f"atribuições: {assigned} | provisórias confirmadas: {confirmed} | "
-          f"linhas gravadas: {len(changed)}")
-    if invalid:
-        print(f"\n⚠ {len(invalid)} fora da taxonomia (corrija taxonomy.yaml ou as decisões):")
-        for tid, c, s in invalid[:15]:
-            print(f"  {tid}: {c} / {s}")
-    _print_stats(ledger)
-
-    # regera os relatórios no MESMO processo, reaproveitando o ledger e a
-    # taxonomia já em memória — evita reler tudo do Sheets num 2º processo.
-    if do_report:
-        from . import report as RP
-        RP.generate(recs=list(ledger.values()), taxonomy=tax, treatments=treats,
-                    rules=rules)
+    print("\n".join(summary(result)))
+    return result
 
 
 # ----------------------------------------------------------------------------- stats
-def _print_stats(ledger: dict) -> None:
+def _stats(ledger: dict) -> dict:
     total = len(ledger)
     cat = sum(1 for r in ledger.values() if r["category"] or r.get("splits"))
-    rev = sum(1 for r in ledger.values() if r["reviewed"])
-    flag = sum(1 for r in ledger.values() if r["needs_review"])
-    print(f"\nLedger: {total} | categorizadas: {cat} | confirmadas: {rev} | "
-          f"sem categoria: {total - cat} | a revisar: {flag}")
+    return {"total": total, "categorized": cat, "uncategorized": total - cat,
+            "reviewed": sum(1 for r in ledger.values() if r["reviewed"]),
+            "needs_review": sum(1 for r in ledger.values() if r["needs_review"])}
+
+
+def _stats_line(counts: dict) -> str:
+    return (f"\nLedger: {counts['total']} | categorizadas: {counts['categorized']} | "
+            f"confirmadas: {counts['reviewed']} | sem categoria: "
+            f"{counts['uncategorized']} | a revisar: {counts['needs_review']}")
 
 
 def stats() -> None:
     ledger = L.load_ledger()
     if not ledger:
-        sys.exit("Ledger vazio.")
+        raise FinanceError("Ledger vazio.")
     src = Counter(r["category_source"] or "uncategorized" for r in ledger.values())
     print("Por origem:", dict(src))
     by_cat = Counter(r["category"] or "(sem)" for r in ledger.values())
     for c, n in by_cat.most_common():
         print(f"  {n:5d}  {c}")
-    _print_stats(ledger)
+    print(_stats_line(_stats(ledger)))
 
 
 def main() -> None:
@@ -381,4 +423,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

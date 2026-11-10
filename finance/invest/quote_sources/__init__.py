@@ -15,7 +15,6 @@ fórmula deixava (valor em reais e data como número serial).
 
 import http.client
 import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
@@ -187,6 +186,7 @@ def refresh(force: bool = False) -> dict:
     return {"updated": sorted(priced), "failed": failed, "fresh": sorted(fresh_tickers)}
 
 
-def report(result: dict, out=sys.stdout) -> None:
-    for ticker, reason in sorted(result["failed"].items()):
-        print(f"  ! Sem cotação nova para {ticker}: {reason}", file=out)
+def failures(result: dict) -> list[str]:
+    """Uma linha por ticker que ficou sem cotação nova, com o motivo."""
+    return [f"Sem cotação nova para {ticker}: {reason}"
+            for ticker, reason in sorted(result["failed"].items())]

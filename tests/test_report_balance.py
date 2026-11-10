@@ -1,19 +1,14 @@
-import pytest
-
 from finance import report
 
-
-@pytest.fixture(autouse=True)
-def treatments(monkeypatch):
-    monkeypatch.setattr(report, "_TREAT", {"Casa": "fluxo", "Salário": "fluxo",
-                                           "Reserva": "poupança"})
-    monkeypatch.setattr(report, "_SAVING_SUBS", ("Aporte", "Resgate"))
+TREATMENTS = {"Casa": "fluxo", "Salário": "fluxo", "Reserva": "poupança"}
+CTX = report.Ctx(TREATMENTS, ("Aporte", "Resgate"))
+FREE = CTX._replace(free_tickers=frozenset({"LIVRE"}))
 
 
 def _month(entries):
     bucket = report._blank()
     for amount, category, subcategory in entries:
-        report._post(bucket, amount, category, subcategory)
+        report._post(CTX, bucket, amount, category, subcategory)
     return report._month_json("2030-01", bucket)
 
 
@@ -51,26 +46,24 @@ def _linked(amount, links, needed):
                 {"ticker": ticker, "amount": value} for ticker, value in links]}}
 
 
-def test_saving_into_free_node_stays_in_balance(monkeypatch):
-    monkeypatch.setattr(report, "_FREE_TICKERS", frozenset({"LIVRE"}))
+def test_saving_into_free_node_stays_in_balance():
     bucket = report._blank()
-    report._post(bucket, 1000, "Salário", None)
-    report._add_record(bucket, _linked(-800, [("OBJETIVO", 500), ("LIVRE", 300)], 800))
+    report._post(FREE, bucket, 1000, "Salário", None)
+    report._add_record(FREE, bucket, _linked(-800, [("OBJETIVO", 500), ("LIVRE", 300)], 800))
     month = report._month_json("2030-01", bucket)
     assert month["saved"] == 500
     assert month["moved_to_free"] == 300
     assert month["net"] == 500
 
 
-def test_withdrawal_from_free_node_does_not_reduce_saved(monkeypatch):
-    monkeypatch.setattr(report, "_FREE_TICKERS", frozenset({"LIVRE"}))
+def test_withdrawal_from_free_node_does_not_reduce_saved():
     bucket = report._blank()
-    report._add_record(bucket, _linked(200, [("LIVRE", 200)], 200))
+    report._add_record(FREE, bucket, _linked(200, [("LIVRE", 200)], 200))
     month = report._month_json("2030-01", bucket)
     assert (month["saved"], month["moved_to_free"], month["net"]) == (0, -200, 0)
 
 
 def test_without_free_nodes_everything_counts_as_saved():
     bucket = report._blank()
-    report._add_record(bucket, _linked(-300, [("LIVRE", 300)], 300))
+    report._add_record(CTX, bucket, _linked(-300, [("LIVRE", 300)], 300))
     assert report._month_json("2030-01", bucket)["saved"] == 300

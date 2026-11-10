@@ -1,10 +1,8 @@
 """`invest sync` com a Pluggy fora do ar num banco: as caixinhas dele ficam intactas."""
 
-from argparse import Namespace
-
-from finance.invest import __main__ as cli
 from finance.invest import accounts as ACC
 from finance.invest import assets as A
+from finance.invest import operations as op
 from finance.invest import pluggy_sync as PS
 from finance.invest import policy as P
 from finance.invest import trades as T
@@ -34,19 +32,20 @@ def test_sync_leaves_buckets_alone_when_their_bank_fails(monkeypatch, tmp_path):
     trades = T.load([{"date": "2026-09-01", "ticker": "RESERVA", "side": "BALANCE",
                       "price": 20000.0}])
     written = []
-    monkeypatch.setattr(cli, "_load_state",
+    monkeypatch.setattr(op, "_load_state",
                         lambda: (assets, accounts, P.load(TEMPLATE), trades))
-    monkeypatch.setattr(cli.Q, "load", lambda: {})
-    monkeypatch.setattr(cli.L, "load_ledger", lambda: {})
-    monkeypatch.setattr(cli.TX, "load_treatments", lambda: {})
-    monkeypatch.setattr(cli.LL, "load_destination_subcategories",
-                        lambda: cli.LL.DESTINATION_SUBCATEGORIES)
-    monkeypatch.setattr(cli.PS, "fetch", lambda: ([], {"item-1"}))
-    monkeypatch.setattr(cli.PS, "fetch_accounts", lambda: [])
-    monkeypatch.setattr(cli, "INVEST_PENDING_FILE", tmp_path / "pending.json")
-    monkeypatch.setattr(cli.T, "append", written.extend)
-    monkeypatch.setattr(cli.R, "generate", lambda **kw: None)
+    monkeypatch.setattr(op.Q, "load", lambda: {})
+    monkeypatch.setattr(op.L, "load_ledger", lambda: {})
+    monkeypatch.setattr(op.TX, "load_treatments", lambda: {})
+    monkeypatch.setattr(op.LL, "load_destination_subcategories",
+                        lambda: op.LL.DESTINATION_SUBCATEGORIES)
+    monkeypatch.setattr(op.PS, "fetch", lambda: ([], {"item-1"}))
+    monkeypatch.setattr(op.PS, "fetch_accounts", lambda: [])
+    monkeypatch.setattr(op, "INVEST_PENDING_FILE", tmp_path / "pending.json")
+    monkeypatch.setattr(op.T, "append", written.extend)
+    monkeypatch.setattr(op.R, "generate", lambda **kw: None)
 
-    cli.cmd_sync(Namespace(apply_balances=True, apply_income=False))
+    result = op.sync(apply_balances=True)
 
     assert written == []
+    assert (result["unchecked_buckets"], result["buckets"]) == (["banco"], {})

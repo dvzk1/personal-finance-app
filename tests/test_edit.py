@@ -5,6 +5,7 @@ Rode: PYTHONPATH=. uv run python tests/test_edit.py
 """
 
 from finance import edit, sheets
+from finance.errors import FinanceError
 
 IDS = ["aaa", "bbb", "ccc"]
 TAGS = [["Viagem"], [], ["Trabalho", "Viagem"]]
@@ -16,9 +17,9 @@ def _recusa(edits):
     dependência do projeto — estes arquivos também rodam como script."""
     try:
         edit.apply_edits(edits)
-    except ValueError:
+    except FinanceError:
         return
-    raise AssertionError(f"esperava ValueError para {edits}")
+    raise AssertionError(f"esperava FinanceError para {edits}")
 
 
 def _fake_backend():

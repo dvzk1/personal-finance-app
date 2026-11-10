@@ -28,6 +28,7 @@ from collections import defaultdict
 
 from . import sheets
 from . import taxonomy as T
+from .errors import FinanceError, run_cli
 
 
 def default() -> dict:
@@ -84,11 +85,11 @@ def _cli(month: str | None) -> None:
 
     ledger = L.load_ledger()
     if not ledger:
-        sys.exit("Ledger vazio. Rode antes: uv run python -m finance.sync")
+        raise FinanceError("Ledger vazio. Rode antes: uv run python -m finance.sync")
     months = sorted({r["date"][:7] for r in ledger.values()})
     m = month or months[-1]
     if m not in months:
-        sys.exit(f"Sem dados para {m}. Disponíveis: {months[0]}..{months[-1]}")
+        raise FinanceError(f"Sem dados para {m}. Disponíveis: {months[0]}..{months[-1]}")
 
     b = load()
     treatments = T.load_treatments()   # só "fluxo" tem teto de orçamento
@@ -139,32 +140,28 @@ def _cli(month: str | None) -> None:
           f"realizado R$ {income - tot_r:,.2f}")
 
 
-def _set_from_file(path: str) -> None:
-    """Salva o JSON de `path` como orçamento no Sheets e regenera os relatórios."""
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+def set_budget(data) -> dict:
+    """Grava o orçamento e regera os relatórios, que dependem dele. Devolve o relatório."""
     if not isinstance(data, dict) or "spending" not in data:
-        sys.exit("Payload inválido: esperado objeto com chave 'spending'.")
+        raise FinanceError("Orçamento inválido: esperado objeto com chave 'spending'.")
     save(data)
     from . import report
-    argv = sys.argv
-    sys.argv = ["finance.report"]  # report.main() usa argparse (lê sys.argv)
-    try:
-        report.main()
-    finally:
-        sys.argv = argv
-    print("Orçamento salvo no Sheets e relatórios atualizados.")
+    return report.generate(budgets=data)
 
 
 def main() -> None:
     args = sys.argv[1:]
     if args and args[0] == "set":
         if len(args) < 2:
-            sys.exit("Uso: python -m finance.budgets set <arquivo.json>")
-        _set_from_file(args[1])
+            raise FinanceError("Uso: python -m finance.budgets set <arquivo.json>")
+        with open(args[1], encoding="utf-8") as f:
+            result = set_budget(json.load(f))
+        from .report import summary
+        print("\n".join(summary(result)))
+        print("Orçamento salvo e relatórios atualizados.")
         return
     _cli(args[0] if args else None)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

@@ -14,6 +14,7 @@ from . import ledger as L
 from . import pluggy_client as pc
 from . import sheets
 from .config import BACKFILL_DAYS, ensure_dirs
+from .errors import FinanceError, run_cli
 from .transaction_dates import load_timezone
 
 
@@ -34,7 +35,7 @@ def _load_min_date() -> str | None:
     try:
         date.fromisoformat(value)
     except ValueError:
-        raise SystemExit(
+        raise FinanceError(
             f"Config[min_transaction_date] inválido: {value!r}. Use o formato YYYY-MM-DD."
         )
     return value
@@ -124,4 +125,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

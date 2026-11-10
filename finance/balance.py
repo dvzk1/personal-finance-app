@@ -2,6 +2,7 @@ import argparse
 from datetime import date
 
 from . import sheets
+from .errors import FinanceError, run_cli
 
 ANCHOR_KEY = "free_balance_anchor"
 
@@ -11,13 +12,13 @@ def parse_anchor(raw) -> dict | None:
     if raw in (None, "", {}):
         return None
     if not isinstance(raw, dict) or "date" not in raw or "value" not in raw:
-        raise SystemExit(f"Config[{ANCHOR_KEY}] inválido: {raw!r}. "
+        raise FinanceError(f"Config[{ANCHOR_KEY}] inválido: {raw!r}. "
                          'Use {"date": "YYYY-MM-DD", "value": 1234.56}.')
     try:
         anchor_date = date.fromisoformat(str(raw["date"]).strip()).isoformat()
         value = round(float(raw["value"]), 2)
     except (TypeError, ValueError):
-        raise SystemExit(f"Config[{ANCHOR_KEY}] inválido: {raw!r}.")
+        raise FinanceError(f"Config[{ANCHOR_KEY}] inválido: {raw!r}.")
     return {"date": anchor_date, "value": value}
 
 
@@ -74,8 +75,8 @@ def main() -> None:
               if anchor else "Sem âncora: o card mostra o acumulado desde o início.")
         return
     from . import report
-    report.generate()
+    print("\n".join(report.summary(report.generate())))
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(run_cli(main))

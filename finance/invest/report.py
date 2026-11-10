@@ -162,9 +162,8 @@ def generate(write_snapshot: bool = True) -> dict:
     pending = Q.missing(quote_map, assets)
     if pending:
         Q.ensure(pending)
-    if sheets.LOCAL:
-        # sem fórmula no banco local, quem preenche o preço é o app
-        QS.report(QS.refresh())
+    # sem fórmula no banco local, quem preenche o preço é o app
+    quote_refresh = QS.refresh() if sheets.LOCAL else None
     if pending or sheets.LOCAL:
         quote_records = sheets.read_records(Q.TAB)
         quote_map = Q.load(quote_records)
@@ -191,18 +190,27 @@ def generate(write_snapshot: bool = True) -> dict:
                    records=list(L.load_ledger().values()),
                    treatments=TX.load_treatments(),
                    subcategories=LL.load_destination_subcategories())
-    path = REPORTS_DIR / "invest.json"
-    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-    total = report["totals"]
-    print(f"Carteira R$ {total['value']:,.2f} | elegível R$ {total['eligible_value']:,.2f}"
-          f" | {len(report['positions'])} ativos -> {path}")
-    for problem in report["problems"]:
-        print(f"  ! {problem}")
+    if quote_refresh is not None:
+        report["quote_refresh"] = quote_refresh
+    (REPORTS_DIR / "invest.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     return report
 
 
+def summary(report: dict) -> list[str]:
+    """Linhas para o terminal: cotações que falharam, totais e problemas."""
+    total = report["totals"]
+    lines = [f"  ! {line}" for line in QS.failures(report.get("quote_refresh")
+                                                    or {"failed": {}})]
+    lines.append(f"Carteira R$ {total['value']:,.2f} | elegível R$ "
+                 f"{total['eligible_value']:,.2f} | {len(report['positions'])} ativos -> "
+                 f"{REPORTS_DIR / 'invest.json'}")
+    lines += [f"  ! {problem}" for problem in report["problems"]]
+    return lines
+
+
 def main() -> None:
-    generate()
+    print("\n".join(summary(generate())))
 
 
 if __name__ == "__main__":

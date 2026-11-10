@@ -9,21 +9,18 @@
 """
 
 import argparse
-import json
 import sys
-from datetime import date
 from pathlib import Path
 
-from .. import ledger as L
 from .. import sheets
-from .. import taxonomy as TX
 from ..config import INVEST_DECISIONS_FILE, INVEST_PENDING_FILE
+from ..errors import FinanceError
+from ..report import summary as flow_summary
 from . import accounts as ACC
 from . import assets as A
 from . import decisions as D
-from . import ledger_link as LL
+from . import operations as OP
 from . import plan as PL
-from . import pluggy_sync as PS
 from . import policy as P
 from . import portfolio as PF
 from . import quote_sources as QS
@@ -46,152 +43,76 @@ def cmd_apply(args) -> int:
     if not data:
         print(f"Nada para aplicar: {path} vazio ou inexistente.")
         return 0
-    assets, accounts, tree, trades = _load_state()
-    records = treatments = None
-    subcategories = LL.DESTINATION_SUBCATEGORIES
-    if D.needs_ledger(data):
-        records = L.load_ledger()
-        treatments = TX.load_treatments()
-        subcategories = LL.load_destination_subcategories()
-    result = D.plan_changes(data, assets, accounts, tree, trades, records, treatments,
-                            subcategories)
-
-    if result["accounts"] != accounts:
-        ACC.save(result["accounts"])
-        print(f"Contas: {len(result['accounts'])}")
-    if result["policy"] != tree:
-        P.save(result["policy"])
-        print(f"Política: {len(result['policy'])} nós")
-    if result["assets"] != assets:
-        A.save(result["assets"])
-        print(f"Ativos: {len(result['assets'])}")
-    if result["removed_trades"]:
-        kept = [trade for trade in trades if trade["id"] not in result["removed_trades"]]
-        T.save(kept + result["trades"])
-        print(f"Movimentações substituídas: -{len(result['removed_trades'])} "
-              f"+{len(result['trades'])}")
-    elif result["trades"]:
-        T.append(result["trades"])
-        print(f"Movimentações gravadas: {len(result['trades'])}")
-    if result["contribution_settings"]:
-        settings = result["contribution_settings"]
-        sheets.write_config(R.CONTRIBUTION_KEY, settings["amount"])
-        sheets.write_config(R.CONTRIBUTION_MODE_KEY, settings["mode"])
-        print(f"Próximo aporte: {_money(settings['amount'])}")
-    if result["allocation_sim"] is not None:
-        sheets.write_config(R.ALLOCATION_SIM_KEY, result["allocation_sim"])
-        print(f"Simulador de alocação: {len(result['allocation_sim']['items'])} linha(s)")
-    pending = Q.missing(Q.load(), result["assets"])
-    if pending:
-        Q.ensure(pending)
-        print(f"Cotações criadas: {', '.join(e['ticker'] for e in pending)}")
-
+    result = OP.apply(data)
+    saved = result["saved"]
+    labels = {"accounts": "Contas: {}", "policy": "Política: {} nós",
+              "assets": "Ativos: {}", "trades": "Movimentações gravadas: {}",
+              "allocation_sim": "Simulador de alocação: {} linha(s)"}
+    for key, label in labels.items():
+        if key in saved:
+            print(label.format(saved[key]))
+    if "trades_replaced" in saved:
+        replaced = saved["trades_replaced"]
+        print(f"Movimentações substituídas: -{replaced['removed']} +{replaced['added']}")
+    if "contribution" in saved:
+        print(f"Próximo aporte: {_money(saved['contribution'])}")
+    if "quotes_created" in saved:
+        print(f"Cotações criadas: {', '.join(saved['quotes_created'])}")
     for problem in result["problems"]:
         print(f"  ! {problem}")
-    R.generate()
-    if records is not None:
-        from .. import report as flow_report
-        flow_report.generate(recs=list(records.values()))
+    print("\n".join(R.summary(result["invest_report"])))
+    if result["flow_report"]:
+        print("\n".join(flow_summary(result["flow_report"])))
     return 1 if result["link_problems"] else 0
 
 
 def cmd_sync(args) -> int:
     """Confere a carteira com o que as corretoras informam. Nunca escreve sozinho:
     divergência de quantidade pede movimentação, saldo pede confirmação."""
-    assets, accounts, tree, trades = _load_state()
-    positions = PF.build(assets, trades, Q.load())
-    today = date.today().isoformat()
-
-    records = list(L.load_ledger().values())
-    destinations = LL.destination_pending(records, trades, TX.load_treatments(), assets,
-                                          LL.load_destination_subcategories())
-
-    print("Lendo investimentos na Pluggy...")
-    investments, failed_items = PS.fetch()
-    bucket_items = {account["pluggy_item_id"] for account in accounts.values()
-                    if account["kind"] == "bucket" and account["pluggy_item_id"]}
-    pending = PS.reconcile(investments, positions, assets, today, bucket_items)
-    pending.extend(PS.reconcile_accounts(PS.fetch_accounts(), positions, assets, today,
-                                         records))
-    pending.extend(destinations)
-
-    buckets_report = {}
-    for account in accounts.values():
-        if account["kind"] != "bucket" or not account["pluggy_item_id"]:
-            continue
-        if str(account["pluggy_item_id"]) in failed_items:
-            # Sem a resposta do banco não existe total para ratear. Somar zero aqui
-            # faria o `--apply-balances` gravar saldo zero em todas as caixinhas.
-            print(f"\n{account['name']}: a Pluggy falhou, caixinhas não conferidas")
-            continue
-        total = PS.account_total(investments, account["pluggy_item_id"])
-        held = PS.bucket_balances(positions, assets, account["id"])
-        report = PS.bucket_report(total, held)
-        blocking = PS.blocking_destinations(destinations, account["pluggy_item_id"])
-        report["blocked"] = len(blocking)
-        buckets_report[account["id"]] = report
-        print(f"\n{account['name']}: total {_money(report['total'])}, "
+    print("Conferindo com a Pluggy e o extrato...")
+    result = OP.sync(args.apply_balances, args.apply_income)
+    for name in result["unchecked_buckets"]:
+        print(f"\n{name}: a Pluggy falhou, caixinhas não conferidas")
+    for report in result["buckets"].values():
+        print(f"\n{report['name']}: total {_money(report['total'])}, "
               f"registrado {_money(report['registered'])}, "
               f"a alocar {_money(report['unallocated'])}")
-        if blocking:
-            print(f"  rateio suspenso: {len(blocking)} aporte(s) sem destino nesta conta")
-
-    print("\nLendo o extrato para proventos...")
-    income, income_pending = LL.income_from_ledger(records, assets, positions, trades)
-    pending.extend(income_pending)
-    print(f"  {len(income)} provento(s) reconhecido(s)")
-
-    updates = PS.suggested_trades(pending)
-    for report in buckets_report.values():
-        updates.extend(T.normalize(row) for row in PS.bucket_updates(report, today))
-
-    INVEST_PENDING_FILE.write_text(json.dumps(
-        {"generated_at": today, "pending": pending, "buckets": buckets_report,
-         "suggested_trades": updates, "income": income},
-        ensure_ascii=False, indent=2) + "\n")
-    print(f"\n{len(pending)} pendência(s):")
-    for item in pending:
+        if report["blocked"]:
+            print(f"  rateio suspenso: {report['blocked']} aporte(s) sem destino nesta conta")
+    print(f"\n{len(result['income'])} provento(s) reconhecido(s) no extrato")
+    print(f"\n{len(result['pending'])} pendência(s):")
+    for item in result["pending"]:
         print(f"  ! {item['message']}")
     print(f"\nGravado em {INVEST_PENDING_FILE}")
-    to_write = []
-    if args.apply_balances:
-        to_write += [t for t in updates if t["side"] == "BALANCE"]
-    if args.apply_income:
-        to_write += income
-    if to_write:
-        T.append(to_write)
-        print(f"Gravado: {len(to_write)} lançamento(s)")
-        R.generate()
-    else:
-        hints = []
-        if updates:
-            hints.append(f"{len(updates)} saldo(s) com --apply-balances")
-        if income:
-            hints.append(f"{len(income)} provento(s) com --apply-income")
-        if hints:
-            print("Sugestões prontas: " + ", ".join(hints) + ".")
+    if result["written"]:
+        print(f"Gravado: {result['written']} lançamento(s)")
+        print("\n".join(R.summary(result["invest_report"])))
+        return 0
+    hints = []
+    if result["suggested_trades"]:
+        hints.append(f"{len(result['suggested_trades'])} saldo(s) com --apply-balances")
+    if result["income"]:
+        hints.append(f"{len(result['income'])} provento(s) com --apply-income")
+    if hints:
+        print("Sugestões prontas: " + ", ".join(hints) + ".")
     return 0
 
 
 def cmd_quotes(args) -> int:
-    """Busca as cotações agora. Na planilha quem cota é o GOOGLEFINANCE, então não há o
-    que fazer; no banco local é o mesmo refresh que o `report` roda, sem esperar."""
-    if not sheets.LOCAL:
+    result = OP.refresh_quotes(force=args.force)
+    if result is None:
         print("Na planilha as cotações vêm do GOOGLEFINANCE: nada a buscar.")
         return 0
-    pending = Q.missing(Q.load(), A.load())
-    if pending:
-        Q.ensure(pending)
-    result = QS.refresh(force=args.force)
     print(f"Cotações atualizadas: {len(result['updated'])}")
-    QS.report(result)
+    for line in QS.failures(result):
+        print(f"  ! {line}")
     for ticker in result["fresh"]:
         print(f"  {ticker}: ainda recente, não buscado (use --force)")
     return 1 if result["failed"] else 0
 
 
 def cmd_report(args) -> int:
-    R.generate(write_snapshot=not args.no_snapshot)
+    print("\n".join(R.summary(R.generate(write_snapshot=not args.no_snapshot))))
     return 0
 
 
@@ -274,6 +195,9 @@ def main() -> int:
         return 0
     try:
         return args.func(args)
+    except FinanceError as error:
+        print(error, file=sys.stderr)
+        return 1
     except sheets.SheetsError as error:
         print(f"Erro de acesso ao Sheets: {error}", file=sys.stderr)
         return 1
