@@ -26,7 +26,8 @@ from pathlib import Path
 import gspread
 from gspread.utils import ValueRenderOption, rowcol_to_a1
 
-from .config import DEFAULT_TIMEZONE, GOOGLE_SA_CREDENTIALS, ROOT, SHEET_ID
+from .config import (DEFAULT_TIMEZONE, FINANCE_DB, GOOGLE_SA_CREDENTIALS, ROOT,
+                     SHEET_ID)
 
 SCHEMA_VERSION = 10
 
@@ -565,3 +566,13 @@ def check() -> dict:
     sh = open_sheet()
     return {"title": sh.title, "url": sh.url,
             "tabs": [w.title for w in sh.worksheets()]}
+
+
+# ---------------------------------------------------------------------- backend local
+# Com FINANCE_DB definido, a mesma interface passa a gravar num arquivo SQLite. Fica no
+# fim do módulo porque o backend local lê SCHEMAS daqui.
+LOCAL = bool(FINANCE_DB)
+if LOCAL:
+    from . import sqlite_store as _local
+    for _name in _local.INTERFACE:
+        globals()[_name] = getattr(_local, _name)

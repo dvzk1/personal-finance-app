@@ -39,6 +39,11 @@ SHEET_ID = os.environ.get("SHEET_ID", "").strip()
 # Caminho do JSON da Service Account (gitignored). Default: ./credentials.json na raiz.
 GOOGLE_SA_CREDENTIALS = os.environ.get("GOOGLE_SA_CREDENTIALS", "credentials.json").strip()
 
+# ---- SQLite local (alternativa ao Sheets) ----------------------------------------------
+# Caminho de um arquivo SQLite. Definido, o app inteiro grava nele em vez da planilha e
+# não precisa de SHEET_ID nem de Service Account. Relativo = a partir da raiz do projeto.
+FINANCE_DB = os.environ.get("FINANCE_DB", "").strip()
+
 # Janela máxima de histórico que a Pluggy disponibiliza no backfill.
 BACKFILL_DAYS = 365
 DEFAULT_TIMEZONE = "America/Sao_Paulo"
