@@ -105,7 +105,7 @@ def cmd_sync(args) -> int:
                                           LL.load_destination_subcategories())
 
     print("Lendo investimentos na Pluggy...")
-    investments = PS.fetch()
+    investments, failed_items = PS.fetch()
     bucket_items = {account["pluggy_item_id"] for account in accounts.values()
                     if account["kind"] == "bucket" and account["pluggy_item_id"]}
     pending = PS.reconcile(investments, positions, assets, today, bucket_items)
@@ -116,6 +116,11 @@ def cmd_sync(args) -> int:
     buckets_report = {}
     for account in accounts.values():
         if account["kind"] != "bucket" or not account["pluggy_item_id"]:
+            continue
+        if str(account["pluggy_item_id"]) in failed_items:
+            # Sem a resposta do banco não existe total para ratear. Somar zero aqui
+            # faria o `--apply-balances` gravar saldo zero em todas as caixinhas.
+            print(f"\n{account['name']}: a Pluggy falhou, caixinhas não conferidas")
             continue
         total = PS.account_total(investments, account["pluggy_item_id"])
         held = PS.bucket_balances(positions, assets, account["id"])

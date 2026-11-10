@@ -7,6 +7,7 @@ import { signedBrl, brl, dayMonth } from '../lib/format.js'
 import { SensitiveAmount } from './ui/SensitiveValue.jsx'
 import { DestinationEditor } from './DestinationEditor.jsx'
 import { neededDestination, destinationBalance } from '../lib/destinations.js'
+import { noteToSave } from '../lib/editPayload.js'
 import {
   Pencil, Tags, Sparkles, MessageSquare, SplitSquareHorizontal, Plus, Trash2,
   Users, EyeOff, Eye, X, StickyNote, Link2,
@@ -63,6 +64,8 @@ export function EditModal({ open, onClose, txns, taxonomy, allTxns, availableTag
   const [settleWith, setSettleWith] = useState(
     () => (txns.length === 1 ? txns[0]?.settle_with : '') || '')
   const [settleTouched, setSettleTouched] = useState(false)
+  // A nota só vai para a API se o campo for editado (ver noteToSave).
+  const [noteTouched, setNoteTouched] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [tagsToAdd, setTagsToAdd] = useState([])
   const [tagsToRemove, setTagsToRemove] = useState([])
@@ -214,7 +217,7 @@ export function EditModal({ open, onClose, txns, taxonomy, allTxns, availableTag
         mode, ids,
         category: cat || null,
         subcategory: sub || null,
-        note: note.trim(),
+        note: noteToSave(note, noteTouched),
         samples: txns.slice(0, 6).map((x) => ({
           date: x.date, description: x.description, signed_amount: x.signed_amount,
         })),
@@ -622,7 +625,7 @@ export function EditModal({ open, onClose, txns, taxonomy, allTxns, availableTag
           Nota
           <span className="text-faint"> (aparece no hover
             {txns.length > 1 && !propagating ? ', vale para todos' : ''})</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)}
+          <textarea value={note} onChange={(e) => { setNote(e.target.value); setNoteTouched(true) }}
             rows={3}
             placeholder="Ex.: dividi a conta com um amigo; jantar de aniversário…"
             className={inputCls('mt-1 w-full resize-y')} />
@@ -657,7 +660,7 @@ export function EditModal({ open, onClose, txns, taxonomy, allTxns, availableTag
       {mode === 'queue' && (
         <label className="mt-4 block text-[12px] text-muted">
           Nota pro Claude (o que você quer que eu faça)
-          <textarea value={note} onChange={(e) => setNote(e.target.value)}
+          <textarea value={note} onChange={(e) => { setNote(e.target.value); setNoteTouched(true) }}
             rows={4} autoFocus
             placeholder="Ex.: esse PIX foi reembolso do escritório do Hugo,
 trata como Compartilhado e anula com o que ele me mandou…"

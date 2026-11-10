@@ -157,3 +157,16 @@ def test_balance_of_a_dollar_asset_is_recorded_in_dollars():
 
     assert result["trades"][0]["currency"] == "USD"
     assert result["trades"][0]["price"] == 15.70
+
+
+def test_applying_the_same_file_twice_records_nothing_new():
+    data = {"trades": [{"date": "2026-09-07", "ticker": "BBAS3", "side": "BUY",
+                        "quantity": 10, "price": 25.0, "account": "xp"}],
+            "balances": [{"ticker": "BBAS3", "date": "2026-09-08", "value": 260.0}]}
+    first = _apply(data)
+    assert len(first["trades"]) == 2
+
+    again = _apply(data, trades=first["trades"])
+
+    assert again["trades"] == []
+    assert sum("já está gravada" in problem for problem in again["problems"]) == 2

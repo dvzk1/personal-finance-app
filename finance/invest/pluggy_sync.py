@@ -46,23 +46,28 @@ def is_noise(investment: dict) -> bool:
     return abs(investment["balance"]) <= NOISE_TOLERANCE
 
 
-def fetch(item_ids=None) -> list[dict]:
-    """Investimentos de cada item, já sem o ruído. Uma request por item."""
+def fetch(item_ids=None) -> tuple[list[dict], set[str]]:
+    """Investimentos de cada item, já sem o ruído, e os ids dos itens que falharam.
+    Uma request por item.
+
+    A falha volta separada porque item que falhou não é item vazio: quem soma o
+    total de um banco precisa saber que não tem o número, senão trata como zero."""
     client = pc.build_client(pc.get_api_key())
     api = pluggy_sdk.InvestmentApi(client)
-    out = []
+    out, failed = [], set()
     for item_id in (item_ids or pc.item_ids()):
         try:
             results = api.investments_list(item_id=item_id).results or []
-        except Exception as error:                       # conector sem o produto
+        except Exception as error:     # conector sem o produto, item fora do ar, rede
             print(f"  ! item {str(item_id)[:8]}: {str(error)[:120]}")
+            failed.add(str(item_id))
             continue
         found = [normalize_investment(raw, item_id) for raw in results]
         kept = [inv for inv in found if not is_noise(inv)]
         print(f"  item {str(item_id)[:8]}: {len(kept)} posições "
               f"({len(found) - len(kept)} zeradas ignoradas)")
         out.extend(kept)
-    return out
+    return out, failed
 
 
 def normalize_account(raw, item_id: str) -> dict:

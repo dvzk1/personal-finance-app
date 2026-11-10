@@ -234,7 +234,10 @@ def apply(learn: bool, do_report: bool = False) -> None:
     for a in dec.get("assignments", []):
         cat, sub = a.get("category"), a.get("subcategory")
         splits = a.get("splits")
-        changes_classification = bool(cat or splits or "amount_override" in a)
+        # Só categoria ou divisão reclassificam o lançamento. Uma decisão que traz
+        # apenas `amount_override` corrige o valor e mantém categoria, subcategoria,
+        # divisão e origem; antes ela caía no ramo de baixo e apagava tudo isso.
+        changes_classification = bool(cat or splits)
         for tid in a["ids"]:
             rec = ledger.get(tid)
             if not rec:
@@ -246,15 +249,22 @@ def apply(learn: bool, do_report: bool = False) -> None:
                     rec.get("tags"), a.get("tags_add"), a.get("tags_remove"))
             if "settle_with" in a:
                 rec["settle_with"] = (a["settle_with"] or "").strip() or None
+            # Valor corrigido à mão (ex.: compra em dólar que a Pluggy gravou sem
+            # converter). Entra antes da divisão, que é conferida contra o valor novo.
+            if "amount_override" in a:
+                rec["amount_override"] = a["amount_override"]
             if not changes_classification:
+                # A divisão que já existia foi feita sobre o valor antigo. Não dá para
+                # redistribuir as partes sem saber a intenção, então só avisa.
+                if rec.get("splits") and "amount_override" in a:
+                    tot = round(sum(s["amount"] for s in rec["splits"]), 2)
+                    if abs(tot - L.effective_amount(rec)) > 0.01:
+                        print(f"  ⚠ {tid}: a divisão soma {tot} e o valor agora é "
+                              f"{L.effective_amount(rec)}; refaça a divisão")
                 if "note" in a:
                     rec["note"] = (a["note"] or None)
                 assigned += 1
                 continue
-            # override manual de valor (ex.: compra em dólar gravada errada).
-            # Aplica antes do split p/ a soma bater com o valor efetivo.
-            if "amount_override" in a:
-                rec["amount_override"] = a["amount_override"]
             if splits:
                 # divide o lançamento; a soma deve bater com o valor efetivo
                 eff = L.effective_amount(rec)

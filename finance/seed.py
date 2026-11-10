@@ -98,7 +98,9 @@ def _seed_invest(fixtures: dict) -> None:
     print(f"  InvestPolicy:   {len(tree)} nós da política")
     print(f"  InvestAssets:   {len(assets)} ativos")
     print(f"  InvestTrades:   {len(fixtures['trades'])} movimentações")
-    pending = Q.missing({}, assets)
+    # Quotes é a aba com fórmula e só recebe linhas por append, então o --force não a
+    # limpa como as outras. Cria só as cotações que faltam, ou cada execução duplica.
+    pending = Q.missing(Q.load(), assets)
     if pending:
         Q.ensure(pending)
         print(f"  Quotes:         {len(pending)} fórmulas do Google Finance criadas")

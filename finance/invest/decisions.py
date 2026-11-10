@@ -181,6 +181,7 @@ def plan_changes(data: dict, assets: dict, accounts: dict, tree: dict,
         assets[asset["ticker"]] = A.normalize(merged)
 
     new_trades: list[dict] = []
+    recorded = {_fingerprint(trade) for trade in map(T.normalize, existing)}
     for row in list(data.get("trades") or []) + _balances_as_trades(data):
         trade = T.normalize(row)
         if not trade["ticker"]:
@@ -197,6 +198,14 @@ def plan_changes(data: dict, assets: dict, accounts: dict, tree: dict,
         if trade["ledger_id"] and records is not None and trade["ledger_id"] not in records:
             problems.append(f"Movimentação de {trade['ticker']} aponta para o lançamento "
                             f"{trade['ledger_id']}, que não existe no Ledger.")
+            continue
+        if _fingerprint(trade) in recorded:
+            # O id é gerado a cada apply e não reconhece o que já foi gravado, então a
+            # comparação é pelo conteúdo. Rodar o mesmo arquivo de novo (por exemplo,
+            # depois de um erro no meio) não duplica nada. Só se compara com o que já
+            # está na aba: duas compras idênticas no mesmo arquivo entram as duas.
+            problems.append(f"{trade['side']} de {trade['ticker']} em {trade['date']} "
+                            "já está gravada: ignorada.")
             continue
         if trade["ticker"] not in assets:
             assets[trade["ticker"]] = _asset_from_trade(trade, tree, problems)
@@ -227,6 +236,14 @@ def plan_changes(data: dict, assets: dict, accounts: dict, tree: dict,
             "link_problems": link_problems,
             "quotes": quotes, "problems": problems,
             "contribution_settings": contribution, "allocation_sim": allocation_sim}
+
+
+def _fingerprint(trade: dict) -> tuple:
+    """Campos que identificam uma movimentação. Ficam de fora o id e o `created_at`,
+    que mudam a cada apply, e a nota e a origem, que não mudam o fato registrado."""
+    return (trade["date"], trade["ticker"], trade["side"], trade["quantity"],
+            trade["price"], trade["fees"], trade["currency"], trade["fx_rate"],
+            trade["account"], trade["ledger_id"])
 
 
 def _balances_as_trades(data: dict) -> list[dict]:

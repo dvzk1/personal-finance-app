@@ -76,3 +76,23 @@ def test_foreign_seed_trade_keeps_native_price_and_rate():
     voo = [t for t in trades if t["ticker"] == "VOO"][0]
     assert voo["currency"] == "USD"
     assert voo["fx_rate"] == 5.02
+
+
+def test_seeding_twice_keeps_one_quote_per_ticker(monkeypatch):
+    from finance import seed, sheets
+
+    store = {}
+    monkeypatch.setattr(sheets, "read_records", lambda tab: list(store.get(tab, [])))
+    monkeypatch.setattr(sheets, "write_records",
+                        lambda tab, recs: store.__setitem__(tab, list(recs)))
+    # a planilha devolve o resultado da fórmula, não o texto dela; aqui, ainda vazio
+    monkeypatch.setattr(sheets, "append_rows", lambda tab, rows, **kw: store.setdefault(
+        tab, []).extend({**row, "price": None, "updated_at": None} for row in rows))
+    fixtures = seed._read_invest_fixtures(SEED_DIR)
+
+    seed._seed_invest(fixtures)
+    first = [row["ticker"] for row in store["Quotes"]]
+    seed._seed_invest(fixtures)
+
+    assert first
+    assert [row["ticker"] for row in store["Quotes"]] == first
